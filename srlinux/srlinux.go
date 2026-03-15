@@ -20,7 +20,6 @@ func init() {
 				regexp.MustCompile(`(?:SR Linux|SRL|srl_nokia)[- :v]+(\d+\.\d+)`),
 			},
 			DefaultVersion:    "25.10",
-			URISuffixes:       []string{".srl.cfg", ".srl"},
 			YangDirBase:       "srlinux",
 			YangDirFilePrefix: "srlinux_",
 			Hints: map[string][]string{

@@ -22,7 +22,6 @@ func init() {
 				regexp.MustCompile(`Configuration format version (\d+\.\d+)`),
 			},
 			DefaultVersion:    "26.3",
-			URISuffixes:       []string{".sros.cfg"},
 			YangDirBase:       "sros",
 			YangDirFilePrefix: "latest_sros_",
 			Hints: map[string][]string{

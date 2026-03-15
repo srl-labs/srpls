@@ -11,9 +11,18 @@ func Register(l Language) {
 	Registry = append(Registry, l)
 }
 
-func GetLanguage(uri string) Language {
+func FilterRegistry(name string) {
 	for _, l := range Registry {
-		if l.MatchesURI(uri) {
+		if l.Name() == name {
+			Registry = []Language{l}
+			return
+		}
+	}
+}
+
+func GetLanguage(name string) Language {
+	for _, l := range Registry {
+		if l.Name() == name {
 			return l
 		}
 	}

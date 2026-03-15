@@ -11,6 +11,7 @@ import (
 )
 
 var documentStore = make(map[string]string)
+var documentLangs = make(map[string]Language)
 
 var DocumentVersions = make(map[string]string)
 
@@ -75,10 +76,11 @@ func TextDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 	content := params.TextDocument.Text
 	documentStore[uri] = content
 
-	l := GetLanguage(uri)
+	l := GetLanguage(params.TextDocument.LanguageID)
 	if l == nil {
 		return nil
 	}
+	documentLangs[uri] = l
 
 	detectAndHandleVersion(ctx, uri, content, l)
 	return nil
@@ -92,7 +94,7 @@ func TextDocumentDidChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		}
 	}
 
-	l := GetLanguage(uri)
+	l := documentLangs[uri]
 	if l == nil {
 		return nil
 	}
@@ -109,6 +111,7 @@ func TextDocumentDidClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	uri := params.TextDocument.URI
 	scheduler.cancel(uri)
 	delete(documentStore, uri)
+	delete(documentLangs, uri)
 	delete(DocumentVersions, uri)
 	ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,

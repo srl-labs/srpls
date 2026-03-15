@@ -15,7 +15,7 @@ func NewDocumentContext(uri string) *DocumentContext {
 	if !ok {
 		return nil
 	}
-	lang := GetLanguage(uri)
+	lang := documentLangs[uri]
 	if lang == nil {
 		return nil
 	}

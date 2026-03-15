@@ -1,6 +1,10 @@
 package main
 
 import (
+	"flag"
+	"fmt"
+	"os"
+
 	"github.com/srl-labs/srpls/core"
 	_ "github.com/srl-labs/srpls/srlinux"
 	_ "github.com/srl-labs/srpls/sros"
@@ -18,6 +22,21 @@ var (
 )
 
 func main() {
+	nos := flag.String("nos", "", "NOS to start lang srv for, ie. srlinux, sros")
+	flag.Parse()
+
+	if *nos == "" {
+		fmt.Fprintln(os.Stderr, "required flag: --nos")
+		flag.Usage()
+		os.Exit(1)
+	}
+
+	if core.GetLanguage(*nos) == nil {
+		fmt.Fprintf(os.Stderr, "unknown NOS: %s\n", *nos)
+		os.Exit(1)
+	}
+	core.FilterRegistry(*nos)
+
 	core.AppName = "Nokia SR Language Server"
 	commonlog.Configure(1, nil)
 

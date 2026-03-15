@@ -23,7 +23,6 @@ type ParsedLine struct {
 // Language defines the contract for a network OS language.
 type Language interface {
 	Name() string
-	MatchesURI(uri string) bool
 	SkipDirs() map[string]bool
 	RootModules() []string
 	ParseDocument(content string) map[int]ParsedLine
@@ -90,7 +89,6 @@ type DefaultLanguage struct {
 	CommentPrefixes   []string         // ["#"], ["#", "//"]
 	SkipBlockPrefixes []string         // ["persistent-indices"] for sros
 	VersionPatterns   []*regexp.Regexp // regexes with one capture group for version
-	URISuffixes       []string         // .sros.cfg, .srl.cfg
 	YangDirBase       string           // the subdir UNDER ~/.srpls
 	YangDirFilePrefix string
 	DefaultVersion    string // fallback version when we can't extract with versionpattern from the doc
@@ -101,15 +99,6 @@ func (d *DefaultLanguage) Name() string              { return d.LangName }
 func (d *DefaultLanguage) SkipDirs() map[string]bool { return d.LangSkipDirs }
 func (d *DefaultLanguage) RootModules() []string     { return d.LangRootModules }
 func (d *DefaultLanguage) GetDefaultVersion() string { return d.DefaultVersion }
-
-func (d *DefaultLanguage) MatchesURI(uri string) bool {
-	for _, suffix := range d.URISuffixes {
-		if strings.HasSuffix(uri, suffix) {
-			return true
-		}
-	}
-	return false
-}
 
 func (d *DefaultLanguage) YangDirForVersion(version string) string {
 	home, _ := os.UserHomeDir()
