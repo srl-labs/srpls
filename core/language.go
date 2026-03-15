@@ -25,6 +25,8 @@ type Language interface {
 	Name() string
 	SkipDirs() map[string]bool
 	RootModules() []string
+	IsComment(trimmed string) bool
+	DetectFormat(content string) ConfigFormat
 	ParseDocument(content string) map[int]ParsedLine
 	ValidateLine(line ParsedLine, lineNum uint32, ym *yang.Model) []protocol.Diagnostic
 }
@@ -44,6 +46,7 @@ type CompletionContext struct {
 	Prefix     string
 	Format     ConfigFormat
 	Indent     string
+	HasLeader  bool
 }
 
 type Completer interface {

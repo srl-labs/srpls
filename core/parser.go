@@ -49,7 +49,7 @@ func (d *DefaultLanguage) DetectFormat(content string) ConfigFormat {
 		}
 		return FormatBrace
 	}
-	return FormatBrace
+	return FormatFlat
 }
 
 func (d *DefaultLanguage) ParseBraceDocument(content string) map[int]ParsedLine {
@@ -313,6 +313,7 @@ func (d *DefaultLanguage) FlatContextAtCursor(content string, line, character ui
 		return CompletionContext{Format: FormatFlat}
 	}
 
+	hasLeader := strings.HasPrefix(lineText, "/")
 	lineText = strings.TrimPrefix(lineText, "/")
 
 	tokens := TokenizeLine(lineText)
@@ -334,6 +335,7 @@ func (d *DefaultLanguage) FlatContextAtCursor(content string, line, character ui
 		LineTokens: lineTokens,
 		Prefix:     prefix,
 		Format:     FormatFlat,
+		HasLeader:  hasLeader,
 	}
 }
 
