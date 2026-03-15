@@ -132,6 +132,9 @@ func loadYangModel(ctx *glsp.Context, uri, version string, l Language, yangDir s
 
 	DocumentVersions[uri] = version
 
+	// loaded models, ask for a token re-request from the client
+	ctx.Notify("workspace/semanticTokens/refresh", nil)
+
 	content := documentStore[uri]
 	if content != "" {
 		scheduler.schedule(ctx, uri, content, l, version)

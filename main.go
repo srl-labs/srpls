@@ -54,6 +54,7 @@ func main() {
 		TextDocumentDocumentSymbol:     core.TextDocumentDocumentSymbol,
 		TextDocumentFoldingRange:       core.TextDocumentFoldingRange,
 		TextDocumentFormatting:         core.TextDocumentFormatting,
+		TextDocumentSemanticTokensFull: core.TextDocumentSemanticTokensFull,
 		TextDocumentDidSave:            func(_ *glsp.Context, _ *protocol.DidSaveTextDocumentParams) error { return nil },
 		WorkspaceDidChangeWatchedFiles: func(_ *glsp.Context, _ *protocol.DidChangeWatchedFilesParams) error { return nil },
 	}
@@ -68,6 +69,13 @@ func initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any, error) {
 	capabilities.TextDocumentSync = &syncKind
 	capabilities.CompletionProvider = &protocol.CompletionOptions{}
 	capabilities.HoverProvider = true
+	capabilities.SemanticTokensProvider = &protocol.SemanticTokensOptions{
+		Full: true,
+		Legend: protocol.SemanticTokensLegend{
+			TokenTypes:     core.SemanticTokenTypes,
+			TokenModifiers: []string{},
+		},
+	}
 
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
