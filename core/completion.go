@@ -49,6 +49,15 @@ func TextDocumentCompletion(_ *glsp.Context, params *protocol.CompletionParams) 
 		hints = hinter.ValueHints(schemaPath(lineEntry))
 	}
 
+	if cc.Format == FormatFlat && !cc.HasLeader && len(cc.LineTokens) == 0 && len(cc.ParentPath) == 0 && cc.Prefix == "" {
+		kind := protocol.CompletionItemKindOperator
+		return []protocol.CompletionItem{{
+			Label:    "/",
+			Kind:     &kind,
+			TextEdit: makeTextEdit(prefixRange, "/"),
+		}}, nil
+	}
+
 	switch {
 	case lineEntry != nil && lineEntry.Kind == goyang.LeafEntry:
 		return valueCompletions(lineEntry, cc.Prefix, prefixRange, hints), nil
