@@ -34,7 +34,6 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 		ctx.Notify("srpls/modelsNotFound", map[string]string{
 			"uri":     uri,
 			"version": "",
-			"nos":     l.Name(),
 		})
 		return
 	}
@@ -55,18 +54,15 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 		ctx.Notify("srpls/versionDetected", map[string]string{
 			"uri":     uri,
 			"version": version,
-			"nos":     l.Name(),
 		})
 	} else {
 		ctx.Notify("srpls/modelsNotFound", map[string]string{
 			"uri":     uri,
 			"version": version,
-			"nos":     l.Name(),
 		})
 		ctx.Notify("srpls/versionDetected", map[string]string{
 			"uri":     uri,
 			"version": version,
-			"nos":     l.Name(),
 		})
 	}
 }
