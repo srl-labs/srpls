@@ -1,0 +1,61 @@
+name: Build and Release
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: WillAbides/setup-go-faster@v1.14.0
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go modules
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Export build metadata
+        run: |
+          echo "VERSION=${{ github.event.release.tag_name }}" >>"$GITHUB_ENV"
+
+      - name: Build linux/amd64 binary
+        run: |
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+            -o dist/srpls-linux-amd64 .
+
+      - name: Build linux/arm64 binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+            -o dist/srpls-linux-arm64 .
+
+      - name: Make binaries executable
+        run: |
+          chmod +x dist/srpls-linux-*
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/srpls-linux-amd64
+            dist/srpls-linux-arm64
