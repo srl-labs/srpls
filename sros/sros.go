@@ -21,12 +21,13 @@ func init() {
 				regexp.MustCompile(`TiMOS-[A-Z]-(\d+\.\d+)`),
 				regexp.MustCompile(`Configuration format version (\d+\.\d+)`),
 			},
-			DefaultVersion:    "26.3",
+			DefaultVersion:    "25.10",
 			YangDirBase:       "sros",
 			YangDirFilePrefix: "latest_sros_",
 			Hints: map[string][]string{
 				"configure/router": {"Base"},
 			},
+			LangSkipDirs: map[string]bool{"nokia-submodule": true},
 		},
 	})
 }
