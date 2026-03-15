@@ -10,6 +10,9 @@ func TextDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbol
 	if doc == nil {
 		return nil, nil
 	}
+	if doc.Lang.DetectFormat(doc.Content) == FormatFlat {
+		return nil, nil
+	}
 	if sp, ok := doc.Lang.(SymbolProvider); ok {
 		return sp.DocumentSymbols(doc.Content, doc.Model), nil
 	}
@@ -19,6 +22,9 @@ func TextDocumentDocumentSymbol(_ *glsp.Context, params *protocol.DocumentSymbol
 func TextDocumentFoldingRange(_ *glsp.Context, params *protocol.FoldingRangeParams) ([]protocol.FoldingRange, error) {
 	doc := NewDocumentContext(params.TextDocument.URI)
 	if doc == nil {
+		return nil, nil
+	}
+	if doc.Lang.DetectFormat(doc.Content) == FormatFlat {
 		return nil, nil
 	}
 	if fp, ok := doc.Lang.(FoldingProvider); ok {
