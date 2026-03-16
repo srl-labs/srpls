@@ -91,6 +91,13 @@ type FoldingProvider interface {
 	FoldingRanges(content string) []protocol.FoldingRange
 }
 
+// FrontPanelRenderer generates a front panel image for hover.
+type FrontPanelRenderer interface {
+	// RenderFrontPanel returns a markdown image string (data URI) with the
+	// given interface highlighted, or "" if not applicable.
+	RenderFrontPanel(interfaceName string, content string) string
+}
+
 type Formatter interface {
 	FormatDocument(content string, options protocol.FormattingOptions) []protocol.TextEdit
 }
