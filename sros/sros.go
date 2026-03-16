@@ -27,7 +27,8 @@ func init() {
 			Hints: map[string][]string{
 				"configure/router": {"Base"},
 			},
-			LangSkipDirs: map[string]bool{"nokia-submodule": true},
+			LangSkipDirs:  map[string]bool{"nokia-submodule": true},
+			QuoteListKeys: true,
 		},
 	})
 }
