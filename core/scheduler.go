@@ -89,7 +89,12 @@ func validateDocument(ctx context.Context, content string, n Language, ym *yang.
 		return diagnostics
 	}
 
-	parsed := n.ParseDocument(content)
+	var parsed map[int]ParsedLine
+	if sap, ok := n.(SchemaAwareParser); ok {
+		parsed = sap.ParseDocumentWithModel(content, ym)
+	} else {
+		parsed = n.ParseDocument(content)
+	}
 	lines := strings.Split(content, "\n")
 
 	for lineNum := 0; lineNum < len(lines); lineNum++ {
@@ -100,7 +105,7 @@ func validateDocument(ctx context.Context, content string, n Language, ym *yang.
 		if !ok {
 			continue
 		}
-		diags := n.ValidateLine(pl, uint32(lineNum), ym)
+		diags := n.ValidateLine(pl, uint32(lineNum), ym, content)
 		diagnostics = append(diagnostics, diags...)
 	}
 	return diagnostics
