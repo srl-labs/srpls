@@ -18,7 +18,12 @@ func TextDocumentHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return nil, nil
 	}
 
-	parsed := doc.Lang.ParseDocument(doc.Content)
+	var parsed map[int]ParsedLine
+	if sap, ok := doc.Lang.(SchemaAwareParser); ok && doc.Model != nil {
+		parsed = sap.ParseDocumentWithModel(doc.Content, doc.Model)
+	} else {
+		parsed = doc.Lang.ParseDocument(doc.Content)
+	}
 	pl, ok := parsed[int(params.Position.Line)]
 	if !ok {
 		return nil, nil
@@ -63,9 +68,7 @@ func resolveHoverEntry(doc *DocumentContext, pl ParsedLine, word string) *goyang
 
 		switch {
 		case entry.Kind == goyang.DirectoryEntry && entry.IsList():
-			if i < len(tokens) {
-				i++
-			}
+			i += listKeyTokenCount(entry)
 			if entry.Dir != nil {
 				children = yang.FlattenChoices(entry.Dir)
 			} else {
