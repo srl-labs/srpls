@@ -39,9 +39,6 @@ func filenameToPlatform(name string) string {
 	return strings.Replace(name, "_", "-", 1)
 }
 
-// highlightRe matches a path element with a specific id to change its fill.
-var highlightRe *regexp.Regexp
-
 // RenderFrontPanel generates a markdown image of the platform front panel
 // with the given interface highlighted.
 func (s *SRLinux) RenderFrontPanel(interfaceName string, content string) string {
