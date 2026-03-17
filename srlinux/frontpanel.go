@@ -72,18 +72,13 @@ func (s *SRLinux) RenderFrontPanel(interfaceName string, content string) string 
 
 // highlightPortByID finds the path with the given id and changes its fill.
 func highlightPortByID(svg string, portID string) string {
-	// Match: id="portID" ... style="...fill:XXXX..."
-	// We need to find the path with this exact id and change its fill color.
 	pattern := fmt.Sprintf(`(<path\s[^>]*id="%s"[^>]*style="[^"]*)(fill:[^;]+)`, regexp.QuoteMeta(portID))
 	re := regexp.MustCompile(pattern)
+	result := re.ReplaceAllString(svg, `${1}fill:#005aff`)
 
-	result := re.ReplaceAllString(svg, `${1}fill:#2979FF`)
-
-	// Also try: style before id
 	pattern2 := fmt.Sprintf(`(<path\s[^>]*style="[^"]*)(fill:[^;]+)([^"]*"[^>]*id="%s")`, regexp.QuoteMeta(portID))
 	re2 := regexp.MustCompile(pattern2)
-
-	result = re2.ReplaceAllString(result, `${1}fill:#2979FF${3}`)
+	result = re2.ReplaceAllString(result, `${1}fill:#005aff${3}`)
 
 	return result
 }
