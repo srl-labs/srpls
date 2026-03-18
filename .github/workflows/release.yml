@@ -14,24 +14,24 @@ jobs:
         include:
           - goos: linux
             goarch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-latest
             nfpm_arch: x86_64
           - goos: linux
             goarch: arm64
-            runner: ubuntu-22.04-arm
+            runner: ubuntu-latest
             nfpm_arch: arm64
           - goos: darwin
             goarch: amd64
-            runner: macos-13
+            runner: macos-14
           - goos: darwin
             goarch: arm64
             runner: macos-14
           - goos: windows
             goarch: amd64
-            runner: ubuntu-22.04
+            runner: ubuntu-latest
           - goos: windows
             goarch: arm64
-            runner: ubuntu-22.04
+            runner: ubuntu-latest
 
     runs-on: ${{ matrix.runner }}
 
