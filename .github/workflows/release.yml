@@ -36,26 +36,35 @@ jobs:
         run: |
           echo "VERSION=${{ github.event.release.tag_name }}" >>"$GITHUB_ENV"
 
-      - name: Build linux/amd64 binary
+      - name: Build release binaries
         run: |
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-            -o dist/srpls-linux-amd64 .
+          for target in \
+            linux/amd64 \
+            linux/arm64 \
+            darwin/amd64 \
+            darwin/arm64 \
+            windows/amd64 \
+            windows/arm64
+          do
+            GOOS="${target%/*}"
+            GOARCH="${target#*/}"
+            OUTPUT="dist/srpls-${GOOS}-${GOARCH}"
+            if [ "$GOOS" = "windows" ]; then
+              OUTPUT="${OUTPUT}.exe"
+            fi
 
-      - name: Build linux/arm64 binary
-        run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-            -o dist/srpls-linux-arm64 .
+            CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" \
+            go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "$OUTPUT" .
+          done
 
       - name: Make binaries executable
         run: |
-          chmod +x dist/srpls-linux-*
+          chmod +x dist/srpls-linux-* dist/srpls-darwin-*
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/srpls-linux-amd64
-            dist/srpls-linux-arm64
+            dist/srpls-*
