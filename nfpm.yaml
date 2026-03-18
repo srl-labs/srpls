@@ -7,7 +7,7 @@ vendor: srl-labs
 license: Apache-2.0
 
 contents:
-  - src: ./srpls
+  - src: ./bin/srpls
     dst: /usr/bin/srpls
     file_info:
       mode: 0755

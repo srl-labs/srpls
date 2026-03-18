@@ -10,5 +10,5 @@ lint:
 build:
 	go build -o bin/srpls .
 
-nfpm:
+nfpm: build
 	ARCH=$(ARCH) PLATFORM=$(PLATFORM) nfpm pkg -p $(PKG_FORMAT) -f nfpm.yaml
