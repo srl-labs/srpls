@@ -134,6 +134,25 @@ func (d *DefaultLanguage) ParseBraceDocument(content string) map[int]ParsedLine 
 			continue
 		}
 
+		// Handle single-line inline blocks (e.g.: member "x" { }).
+		// These are net-zero for scope depth and must not pop parent stack.
+		if strings.Contains(trimmed, "{") && strings.Contains(trimmed, "}") &&
+			strings.Count(trimmed, "{") == strings.Count(trimmed, "}") {
+			blockPart := strings.TrimSpace(trimmed[:strings.Index(trimmed, "{")])
+			tokens := TokenizeLine(blockPart)
+			if len(tokens) >= 1 {
+				pathTokens := make([]string, 0, len(stack)+len(tokens))
+				pathTokens = append(pathTokens, stack...)
+				pathTokens = append(pathTokens, tokens...)
+				result[lineNum] = ParsedLine{
+					PathTokens:  pathTokens,
+					ParentDepth: len(stack),
+					LineText:    line,
+				}
+			}
+			continue
+		}
+
 		if strings.HasSuffix(trimmed, "{") {
 			blockPart := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
 			tokens := TokenizeLine(blockPart)
