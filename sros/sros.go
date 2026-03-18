@@ -21,6 +21,7 @@ func init() {
 				regexp.MustCompile(`TiMOS-[A-Z]-(\d+\.\d+)`),
 				regexp.MustCompile(`Configuration format version (\d+\.\d+)`),
 			},
+			FlatPrefix:        "/",
 			DefaultVersion:    "25.10",
 			YangDirBase:       "sros",
 			YangDirFilePrefix: "latest_sros_",

@@ -10,9 +10,11 @@ import (
 	goyang "github.com/openconfig/goyang/pkg/yang"
 )
 
-// Flatten converts brace-format config to flat "set /" format.
+// Flatten converts brace-format config to flat format.
 func (d *DefaultLanguage) Flatten(content string) string {
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	preamble, body := splitLeadingPreamble(content, d.IsComment)
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	flatPrefix := d.FlatLinePrefix()
 	var out []string
 	var stack []string
 	var depthStack []int
@@ -48,7 +50,7 @@ func (d *DefaultLanguage) Flatten(content string) string {
 				// Empty block — emit the container/list path
 				path := flatPath(stack)
 				if path != "" {
-					out = append(out, "set / "+strings.TrimSpace(path))
+					out = append(out, flatPrefix+strings.TrimSpace(path))
 				}
 			}
 			if len(depthStack) > 0 {
@@ -81,7 +83,7 @@ func (d *DefaultLanguage) Flatten(content string) string {
 			}
 			if leafName != "" && len(vals) > 0 {
 				path := flatPath(stack)
-				out = append(out, "set / "+path+leafName+" [ "+strings.Join(vals, " ")+" ]")
+				out = append(out, flatPrefix+path+leafName+" [ "+strings.Join(vals, " ")+" ]")
 			}
 			continue
 		}
@@ -100,7 +102,19 @@ func (d *DefaultLanguage) Flatten(content string) string {
 				path := flatPath(stack)
 				leafName := tokens[0]
 				afterKey := strings.TrimSpace(fullLine[len(leafName):])
-				out = append(out, "set / "+path+leafName+" "+afterKey)
+				out = append(out, flatPrefix+path+leafName+" "+afterKey)
+			}
+			continue
+		}
+
+		// Handle single-line inline blocks (e.g.: member "x" { }).
+		// These are net-zero for scope depth.
+		if strings.Contains(trimmed, "{") && strings.Contains(trimmed, "}") &&
+			strings.Count(trimmed, "{") == strings.Count(trimmed, "}") {
+			blockPart := strings.TrimSpace(trimmed[:strings.Index(trimmed, "{")])
+			if blockPart != "" {
+				path := flatPath(stack)
+				out = append(out, flatPrefix+path+blockPart)
 			}
 			continue
 		}
@@ -131,18 +145,42 @@ func (d *DefaultLanguage) Flatten(content string) string {
 
 		// Leaf assignment
 		path := flatPath(stack)
-		out = append(out, "set / "+path+trimmed)
+		out = append(out, flatPrefix+path+trimmed)
 	}
 
-	return strings.Join(out, "\n") + "\n"
+	converted := strings.Join(out, "\n")
+	if converted != "" {
+		converted += "\n"
+	}
+	return preamble + converted
 }
 
-// flatPath returns the "set /" body prefix from a stack of path tokens.
+// flatPath returns the path body prefix from a stack of path tokens.
 func flatPath(stack []string) string {
 	if len(stack) == 0 {
 		return ""
 	}
 	return strings.Join(stack, " ") + " "
+}
+
+func splitLeadingPreamble(content string, isComment func(string) bool) (string, string) {
+	if content == "" {
+		return "", ""
+	}
+
+	lines := strings.SplitAfter(content, "\n")
+	idx := 0
+	for idx < len(lines) {
+		raw := strings.TrimRight(lines[idx], "\r\n")
+		trimmed := strings.TrimSpace(raw)
+		if trimmed == "" || isComment(trimmed) {
+			idx++
+			continue
+		}
+		break
+	}
+
+	return strings.Join(lines[:idx], ""), strings.Join(lines[idx:], "")
 }
 
 // UnflattenWithModel converts flat-format config to brace-format using the
@@ -152,7 +190,8 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 		return d.Unflatten(content)
 	}
 
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	preamble, body := splitLeadingPreamble(content, d.IsComment)
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 
 	type item struct {
 		containerPath []string
@@ -256,7 +295,7 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 
 	writeNode(root, "")
 
-	return sb.String()
+	return preamble + sb.String()
 }
 
 // splitFlatLineWithModel uses the YANG model to split a flat line body into
@@ -324,7 +363,8 @@ func splitFlatLineWithModel(body string, ym *yang.Model) (containerPath []string
 // Unflatten converts flat-format config to brace-format config.
 // This is the heuristic version without YANG model access.
 func (d *DefaultLanguage) Unflatten(content string) string {
-	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	preamble, body := splitLeadingPreamble(content, d.IsComment)
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
 
 	type entry struct {
 		path  []string
@@ -449,5 +489,5 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 
 	writeNode(root, "")
 
-	return sb.String()
+	return preamble + sb.String()
 }

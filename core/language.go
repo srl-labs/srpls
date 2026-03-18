@@ -116,6 +116,7 @@ type DefaultLanguage struct {
 	LangRootModules   []string
 	CommentPrefixes   []string         // ["#"], ["#", "//"]
 	SkipBlockPrefixes []string         // ["persistent-indices"] for sros
+	FlatPrefix        string           // "set / " for SR Linux, "/" for SR OS
 	VersionPatterns   []*regexp.Regexp // regexes with one capture group for version
 	YangDirBase       string           // the subdir UNDER ~/.srpls
 	YangDirFilePrefix string
@@ -133,6 +134,13 @@ func (d *DefaultLanguage) Name() string              { return d.LangName }
 func (d *DefaultLanguage) SkipDirs() map[string]bool { return d.LangSkipDirs }
 func (d *DefaultLanguage) RootModules() []string     { return d.LangRootModules }
 func (d *DefaultLanguage) GetDefaultVersion() string { return d.DefaultVersion }
+
+func (d *DefaultLanguage) FlatLinePrefix() string {
+	if d.FlatPrefix != "" {
+		return d.FlatPrefix
+	}
+	return "set / "
+}
 
 func (d *DefaultLanguage) YangDirForVersion(version string) string {
 	home, _ := os.UserHomeDir()
