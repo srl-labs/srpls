@@ -1,0 +1,13 @@
+name: srpls
+arch: ${ARCH}
+platform: ${PLATFORM}
+version: v0.1.1
+description: Nokia SR Language Server
+vendor: srl-labs
+license: Apache-2.0
+
+contents:
+  - src: ./srpls
+    dst: /usr/bin/srpls
+    file_info:
+      mode: 0755
