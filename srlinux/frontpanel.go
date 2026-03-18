@@ -1,9 +1,13 @@
 package srlinux
 
 import (
+	"bytes"
 	"embed"
 	"encoding/base64"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io/fs"
 	"math"
 	"path/filepath"
@@ -32,7 +36,7 @@ func init() {
 		if platform == "" {
 			return nil
 		}
-		chassisSVGs[platform] = string(data)
+		chassisSVGs[platform] = optimizeSVGForHover(string(data))
 		return nil
 	}); err != nil {
 		return
@@ -80,23 +84,42 @@ func (s *SRLinux) RenderFrontPanel(interfaceName string, content string) string 
 
 	highlighted := highlightPortByID(svg, portID)
 	highlighted = normalizeSVGDisplaySize(highlighted)
-	b64 := base64.StdEncoding.EncodeToString([]byte(highlighted))
-	return fmt.Sprintf("![%s](data:image/svg+xml;base64,%s)", platform, b64)
+	return fmt.Sprintf("![%s](%s)", platform, svgDataURI(highlighted))
 }
 
 var (
-	styleAttrRE      = regexp.MustCompile(`\bstyle="([^"]*)"`)
-	fillStyleRE      = regexp.MustCompile(`(?i)(fill\s*:\s*)([^;"]+)`)
-	fillAttrRE       = regexp.MustCompile(`\bfill="[^"]*"`)
-	svgTagRE         = regexp.MustCompile(`(?is)<svg\b[^>]*>`)
-	svgViewBoxRE     = regexp.MustCompile(`(?i)\bviewBox="([^"]+)"`)
-	svgWidthAttrRE   = regexp.MustCompile(`(?i)\bwidth="[^"]*"`)
-	svgHeightAttrRE  = regexp.MustCompile(`(?i)\bheight="[^"]*"`)
-	svgTrailing0sRE  = regexp.MustCompile(`(\.\d*?[1-9])0+$`)
-	svgTrailingDotRE = regexp.MustCompile(`\.0+$`)
+	styleAttrRE       = regexp.MustCompile(`\bstyle="([^"]*)"`)
+	fillStyleRE       = regexp.MustCompile(`(?i)(fill\s*:\s*)([^;"]+)`)
+	fillAttrRE        = regexp.MustCompile(`\bfill="[^"]*"`)
+	svgTagRE          = regexp.MustCompile(`(?is)<svg\b[^>]*>`)
+	svgViewBoxRE      = regexp.MustCompile(`(?i)\bviewBox="([^"]+)"`)
+	svgWidthAttrRE    = regexp.MustCompile(`(?i)\bwidth="[^"]*"`)
+	svgHeightAttrRE   = regexp.MustCompile(`(?i)\bheight="[^"]*"`)
+	svgXMLDeclRE      = regexp.MustCompile(`(?is)^\s*<\?xml[^>]*\?>\s*`)
+	svgXMLNSXLinkRE   = regexp.MustCompile(`\s+xmlns:xlink="[^"]*"`)
+	svgXLinkHrefRE    = regexp.MustCompile(`\s+xlink:href="[^"]*"`)
+	svgImagePNGHrefRE = regexp.MustCompile(`(?i)(\bhref="data:image/png;base64,)([^"]+)(")`)
+	svgTrailing0sRE   = regexp.MustCompile(`(\.\d*?[1-9])0+$`)
+	svgTrailingDotRE  = regexp.MustCompile(`\.0+$`)
+	svgDataURIRepl    = strings.NewReplacer(
+		"%", "%25",
+		"#", "%23",
+		"<", "%3C",
+		">", "%3E",
+		" ", "%20",
+		"(", "%28",
+		")", "%29",
+		"{", "%7B",
+		"}", "%7D",
+	)
 )
 
-const hoverSVGWidth = 457.0
+const (
+	hoverSVGWidth          = 457.0
+	hoverMarkdownTargetLen = 100000
+	hoverRasterMaxWidth    = 640
+	hoverJPEGQuality       = 60
+)
 
 // highlightPortByID finds the SVG element with the given id and changes its fill.
 func highlightPortByID(svg string, portID string) string {
@@ -198,6 +221,117 @@ func formatSVGSize(v float64) string {
 	s = svgTrailing0sRE.ReplaceAllString(s, "$1")
 	s = svgTrailingDotRE.ReplaceAllString(s, "")
 	return s
+}
+
+func optimizeSVGForHover(svg string) string {
+	svg = stripLegacyXLinkAttrs(svg)
+	if estimatedHoverMarkdownLen(svg) <= hoverMarkdownTargetLen {
+		return svg
+	}
+
+	compacted := compactEmbeddedPNG(svg, hoverRasterMaxWidth, hoverJPEGQuality)
+	if compacted == "" {
+		return svg
+	}
+	if estimatedHoverMarkdownLen(compacted) >= estimatedHoverMarkdownLen(svg) {
+		return svg
+	}
+	return compacted
+}
+
+func stripLegacyXLinkAttrs(svg string) string {
+	svg = svgXMLNSXLinkRE.ReplaceAllString(svg, "")
+	svg = svgXLinkHrefRE.ReplaceAllString(svg, "")
+	return svg
+}
+
+func estimatedHoverMarkdownLen(svg string) int {
+	return len("![](") + len(svgDataURI(svg)) + len(")")
+}
+
+func compactEmbeddedPNG(svg string, maxWidth, quality int) string {
+	if maxWidth <= 0 {
+		return svg
+	}
+	if quality < 1 {
+		quality = 1
+	}
+	if quality > 100 {
+		quality = 100
+	}
+
+	m := svgImagePNGHrefRE.FindStringSubmatchIndex(svg)
+	if m == nil {
+		return svg
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(svg[m[4]:m[5]])
+	if err != nil {
+		return svg
+	}
+	img, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return svg
+	}
+
+	bounds := img.Bounds()
+	origW := bounds.Dx()
+	origH := bounds.Dy()
+	if origW <= 0 || origH <= 0 {
+		return svg
+	}
+
+	targetW := origW
+	if targetW > maxWidth {
+		targetW = maxWidth
+	}
+	targetH := int(math.Round(float64(origH) * float64(targetW) / float64(origW)))
+	if targetH < 1 {
+		targetH = 1
+	}
+
+	out := image.Image(img)
+	if targetW != origW || targetH != origH {
+		out = resizeNearest(out, targetW, targetH)
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, out, &jpeg.Options{Quality: quality}); err != nil {
+		return svg
+	}
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+
+	replacement := fmt.Sprintf(`href="data:image/jpeg;base64,%s"`, encoded)
+	return svg[:m[2]] + replacement + svg[m[7]:]
+}
+
+func resizeNearest(src image.Image, targetW, targetH int) *image.RGBA {
+	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+	srcBounds := src.Bounds()
+	srcW := srcBounds.Dx()
+	srcH := srcBounds.Dy()
+	if srcW <= 0 || srcH <= 0 {
+		return dst
+	}
+
+	for y := 0; y < targetH; y++ {
+		srcY := srcBounds.Min.Y + y*srcH/targetH
+		for x := 0; x < targetW; x++ {
+			srcX := srcBounds.Min.X + x*srcW/targetW
+			dst.Set(x, y, src.At(srcX, srcY))
+		}
+	}
+	return dst
+}
+
+func svgDataURI(svg string) string {
+	svg = svgXMLDeclRE.ReplaceAllString(svg, "")
+	svg = strings.TrimSpace(svg)
+	svg = strings.ReplaceAll(svg, "\r", "")
+	svg = strings.ReplaceAll(svg, "\n", "")
+	svg = strings.ReplaceAll(svg, "\t", " ")
+	svg = strings.ReplaceAll(svg, `"`, `'`)
+	return "data:image/svg+xml;utf8," + svgDataURIRepl.Replace(svg)
 }
 
 func parsePortNumber(iface string) int {
