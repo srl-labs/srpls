@@ -42,7 +42,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: WillAbides/setup-go-faster@v1.14.0
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
