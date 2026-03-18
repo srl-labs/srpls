@@ -128,8 +128,8 @@ type DefaultLanguage struct {
 	Owner Language
 }
 
-func (d *DefaultLanguage) SetOwner(l Language) { d.Owner = l }
-func (d *DefaultLanguage) Name() string         { return d.LangName }
+func (d *DefaultLanguage) SetOwner(l Language)       { d.Owner = l }
+func (d *DefaultLanguage) Name() string              { return d.LangName }
 func (d *DefaultLanguage) SkipDirs() map[string]bool { return d.LangSkipDirs }
 func (d *DefaultLanguage) RootModules() []string     { return d.LangRootModules }
 func (d *DefaultLanguage) GetDefaultVersion() string { return d.DefaultVersion }

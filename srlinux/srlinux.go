@@ -3,12 +3,15 @@ package srlinux
 import (
 	"fmt"
 	"regexp"
+	"strings"
 
 	"github.com/srl-labs/srpls/core"
 	"github.com/srl-labs/srpls/utils"
 
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
+
+var versionKeyRe = regexp.MustCompile(`(?i)version\s*=\s*(\d+\.\d+)`)
 
 type SRLinux struct {
 	core.DefaultLanguage
@@ -19,10 +22,7 @@ func init() {
 		DefaultLanguage: core.DefaultLanguage{
 			LangName:        "srlinux",
 			LangRootModules: []string{"srl_nokia"},
-			CommentPrefixes: []string{"#", "//", "!"},
-			VersionPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?:SR Linux|SRL|srl_nokia)[- :v]+(\d+\.\d+)`),
-			},
+			CommentPrefixes:   []string{"#", "//", "!"},
 			DefaultVersion:    "25.10",
 			YangDirBase:       "srlinux",
 			YangDirFilePrefix: "srlinux_",
@@ -32,6 +32,14 @@ func init() {
 			},
 		},
 	})
+}
+
+func (s *SRLinux) DetectVersion(content string) string {
+	line, _, _ := strings.Cut(content, "\n")
+	if m := versionKeyRe.FindStringSubmatch(line); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 func (s *SRLinux) DetectPlatform(content string) string {
