@@ -12,7 +12,7 @@ import (
 
 // Flatten converts brace-format config to flat "set /" format.
 func (d *DefaultLanguage) Flatten(content string) string {
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	var out []string
 	var stack []string
 	var depthStack []int
@@ -25,12 +25,7 @@ func (d *DefaultLanguage) Flatten(content string) string {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
-		if trimmed == "" {
-			out = append(out, "")
-			continue
-		}
-		if d.IsComment(trimmed) {
-			out = append(out, trimmed)
+		if trimmed == "" || d.IsComment(trimmed) {
 			continue
 		}
 
@@ -157,26 +152,18 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 		return d.Unflatten(content)
 	}
 
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 
-	// An item is either a config entry or a comment/blank line.
 	type item struct {
-		containerPath []string // nil for comments
+		containerPath []string
 		leafPart      string
-		comment       string // non-empty for comment/blank lines
-		isComment     bool
 	}
 
 	var items []item
 
 	for i := 0; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" {
-			items = append(items, item{isComment: true, comment: ""})
-			continue
-		}
-		if d.IsComment(trimmed) {
-			items = append(items, item{isComment: true, comment: trimmed})
+		if trimmed == "" || d.IsComment(trimmed) {
 			continue
 		}
 
@@ -204,12 +191,11 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 		items = append(items, item{containerPath: cp, leafPart: lp})
 	}
 
-	// Build a tree. Leaves are strings; comments use a \x00 prefix marker.
 	type node struct {
 		name     string
 		children []*node
 		childMap map[string]*node
-		leaves   []string // leaf lines and \x00-prefixed comment lines
+		leaves   []string
 		order    int
 	}
 
@@ -217,13 +203,6 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 	orderCounter := 0
 
 	for _, it := range items {
-		if it.isComment {
-			// Attach comment/blank to root leaves — they'll be emitted
-			// at the current position relative to config lines.
-			root.leaves = append(root.leaves, "\x00"+it.comment)
-			continue
-		}
-
 		cur := root
 		for _, tok := range it.containerPath {
 			child, ok := cur.childMap[tok]
@@ -240,26 +219,7 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 		}
 	}
 
-	// Separate leading comments from root leaves (emit before tree).
-	var header []string
-	startIdx := 0
-	for i, leaf := range root.leaves {
-		if strings.HasPrefix(leaf, "\x00") {
-			header = append(header, leaf[1:])
-			startIdx = i + 1
-		} else {
-			break
-		}
-	}
-	if startIdx > 0 {
-		root.leaves = root.leaves[startIdx:]
-	}
-
 	var sb strings.Builder
-
-	for _, h := range header {
-		sb.WriteString(h + "\n")
-	}
 
 	var writeNode func(n *node, indent string)
 	writeNode = func(n *node, indent string) {
@@ -274,10 +234,6 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 			} else {
 				sb.WriteString(indent + child.name + " {\n")
 				for _, leaf := range child.leaves {
-					if strings.HasPrefix(leaf, "\x00") {
-						sb.WriteString(indent + "    " + leaf[1:] + "\n")
-						continue
-					}
 					if strings.Contains(leaf, "[") && strings.Contains(leaf, "]") {
 						bracketIdx := strings.Index(leaf, "[")
 						keyword := strings.TrimSpace(leaf[:bracketIdx])
@@ -299,13 +255,6 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 	}
 
 	writeNode(root, "")
-
-	// Trailing comments/blanks still on root
-	for _, leaf := range root.leaves {
-		if strings.HasPrefix(leaf, "\x00") {
-			sb.WriteString(leaf[1:] + "\n")
-		}
-	}
 
 	return sb.String()
 }
@@ -375,25 +324,18 @@ func splitFlatLineWithModel(body string, ym *yang.Model) (containerPath []string
 // Unflatten converts flat-format config to brace-format config.
 // This is the heuristic version without YANG model access.
 func (d *DefaultLanguage) Unflatten(content string) string {
-	lines := strings.Split(content, "\n")
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 
 	type entry struct {
-		path      []string
-		value     string // leaf value, or "[...]" for leaf-list, or quoted multiline
-		comment   string
-		isComment bool
+		path  []string
+		value string // leaf value, or "[...]" for leaf-list
 	}
 
 	var entries []entry
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			entries = append(entries, entry{isComment: true, comment: ""})
-			continue
-		}
-		if d.IsComment(trimmed) {
-			entries = append(entries, entry{isComment: true, comment: trimmed})
+		if trimmed == "" || d.IsComment(trimmed) {
 			continue
 		}
 
@@ -424,12 +366,11 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 		entries = append(entries, entry{path: tokens})
 	}
 
-	// Build a tree
 	type node struct {
 		name     string
 		children []*node
 		childMap map[string]*node
-		leaves   []string // "key value" lines
+		leaves   []string
 		order    int
 	}
 
@@ -437,11 +378,6 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 	orderCounter := 0
 
 	for _, e := range entries {
-		if e.isComment {
-			root.leaves = append(root.leaves, "\x00"+e.comment)
-			continue
-		}
-
 		cur := root
 		pathTokens := e.path
 		if len(pathTokens) == 0 {
@@ -476,26 +412,7 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 		cur.leaves = append(cur.leaves, leafPart)
 	}
 
-	// Separate leading comments from root leaves.
-	var header []string
-	startIdx := 0
-	for i, leaf := range root.leaves {
-		if strings.HasPrefix(leaf, "\x00") {
-			header = append(header, leaf[1:])
-			startIdx = i + 1
-		} else {
-			break
-		}
-	}
-	if startIdx > 0 {
-		root.leaves = root.leaves[startIdx:]
-	}
-
 	var sb strings.Builder
-
-	for _, h := range header {
-		sb.WriteString(h + "\n")
-	}
 
 	var writeNode func(n *node, indent string)
 	writeNode = func(n *node, indent string) {
@@ -510,10 +427,6 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 			} else {
 				sb.WriteString(indent + child.name + " {\n")
 				for _, leaf := range child.leaves {
-					if strings.HasPrefix(leaf, "\x00") {
-						sb.WriteString(indent + "    " + leaf[1:] + "\n")
-						continue
-					}
 					if strings.Contains(leaf, "[") && strings.Contains(leaf, "]") {
 						bracketIdx := strings.Index(leaf, "[")
 						keyword := strings.TrimSpace(leaf[:bracketIdx])
@@ -535,13 +448,6 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 	}
 
 	writeNode(root, "")
-
-	// Trailing comments still on root
-	for _, leaf := range root.leaves {
-		if strings.HasPrefix(leaf, "\x00") {
-			sb.WriteString(leaf[1:] + "\n")
-		}
-	}
 
 	return sb.String()
 }
