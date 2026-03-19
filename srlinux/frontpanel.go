@@ -5,9 +5,14 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/beevik/etree"
+)
+
+const (
+	highlightColor = "#005aff"
 )
 
 //go:embed chassis/*.svg
@@ -79,49 +84,26 @@ func (s *SRLinux) RenderFrontPanel(interfaceName string, content string) string 
 	return fmt.Sprintf("![%s](data:image/svg+xml;base64,%s)", platform, b64)
 }
 
-var (
-	styleAttrRE = regexp.MustCompile(`\bstyle="([^"]*)"`)
-	fillStyleRE = regexp.MustCompile(`(?i)(fill\s*:\s*)([^;"]+)`)
-	fillAttrRE  = regexp.MustCompile(`\bfill="[^"]*"`)
-)
-
 // highlightPortByID finds the SVG element with the given id and changes its fill.
 func highlightPortByID(svg string, portID string) string {
-	pattern := fmt.Sprintf(`<([a-zA-Z][a-zA-Z0-9:_-]*)\b[^>]*\bid="%s"[^>]*>`, regexp.QuoteMeta(portID))
-	re := regexp.MustCompile(pattern)
-	return re.ReplaceAllStringFunc(svg, highlightElement)
-}
-
-func highlightElement(tag string) string {
-	const highlightColor = "#005aff"
-
-	styleLoc := styleAttrRE.FindStringSubmatchIndex(tag)
-	if styleLoc != nil {
-		styleValue := tag[styleLoc[2]:styleLoc[3]]
-		if fillStyleRE.MatchString(styleValue) {
-			styleValue = fillStyleRE.ReplaceAllString(styleValue, "${1}"+highlightColor)
-		} else {
-			trimmed := strings.TrimSpace(styleValue)
-			if trimmed != "" && !strings.HasSuffix(trimmed, ";") {
-				styleValue += ";"
-			}
-			styleValue += "fill:" + highlightColor
-		}
-		return tag[:styleLoc[2]] + styleValue + tag[styleLoc[3]:]
+	doc := etree.NewDocument()
+	if err := doc.ReadFromString(svg); err != nil {
+		return svg
 	}
 
-	if fillAttrRE.MatchString(tag) {
-		return fillAttrRE.ReplaceAllString(tag, `fill="`+highlightColor+`"`)
+	el := doc.FindElement(fmt.Sprintf("//*[@id='%s']", portID))
+	if el == nil {
+		return svg
 	}
 
-	insertAt := strings.LastIndex(tag, "/>")
-	if insertAt == -1 {
-		insertAt = strings.LastIndex(tag, ">")
+	el.RemoveAttr("style")
+	el.CreateAttr("fill", highlightColor)
+
+	out, err := doc.WriteToString()
+	if err != nil {
+		return svg
 	}
-	if insertAt == -1 {
-		return tag
-	}
-	return tag[:insertAt] + ` fill="` + highlightColor + `"` + tag[insertAt:]
+	return out
 }
 
 func parsePortNumber(iface string) int {
