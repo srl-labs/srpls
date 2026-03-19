@@ -16,7 +16,7 @@ import (
 	"strings"
 )
 
-//go:embed chassis/*.svg chassis/*/*.svg
+//go:embed chassis/*.svg
 var chassisFS embed.FS
 
 // chassisSVGs maps lower-cased platform name to embedded SVG content.
