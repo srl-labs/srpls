@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -86,6 +87,16 @@ func resolvePlatform(name string) string {
 		return full
 	}
 	return defaultPlatform
+}
+
+// KnownPlatformNames returns the sorted list of all known platform names.
+func KnownPlatformNames() []string {
+	names := make([]string, 0, len(platformInterfaces))
+	for name := range platformInterfaces {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // InterfacesForPlatform returns the interface names for a given platform,

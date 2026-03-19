@@ -63,6 +63,40 @@ func (s *SRLinux) HintDetail(schemaPath string, content string) string {
 	return ""
 }
 
+func (s *SRLinux) SetVersionDirective(content, version string) string {
+	line1, rest, hasRest := strings.Cut(content, "\n")
+	if versionKeyRe.MatchString(line1) {
+		line1 = versionKeyRe.ReplaceAllString(line1, "version="+version)
+	} else if strings.HasPrefix(strings.TrimSpace(line1), "#") || strings.HasPrefix(strings.TrimSpace(line1), "//") || strings.HasPrefix(strings.TrimSpace(line1), "!") {
+		line1 = line1 + " version=" + version
+	} else {
+		line1 = "# version=" + version + "\n" + line1
+	}
+	if hasRest {
+		return line1 + "\n" + rest
+	}
+	return line1
+}
+
+func (s *SRLinux) SetPlatformDirective(content, platform string) string {
+	line1, rest, hasRest := strings.Cut(content, "\n")
+	if platformRe.MatchString(line1) {
+		line1 = platformRe.ReplaceAllString(line1, "platform="+platform)
+	} else if strings.HasPrefix(strings.TrimSpace(line1), "#") || strings.HasPrefix(strings.TrimSpace(line1), "//") || strings.HasPrefix(strings.TrimSpace(line1), "!") {
+		line1 = line1 + " platform=" + platform
+	} else {
+		line1 = "# platform=" + platform + "\n" + line1
+	}
+	if hasRest {
+		return line1 + "\n" + rest
+	}
+	return line1
+}
+
+func (s *SRLinux) KnownPlatforms() []string {
+	return KnownPlatformNames()
+}
+
 func (s *SRLinux) ValidateHint(schemaPath string, value string, content string, lineNum, start, end uint32) *protocol.Diagnostic {
 	if schemaPath != "interface" {
 		return nil

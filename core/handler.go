@@ -57,7 +57,7 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 		scheduler.schedule(ctx, uri, content, l, version)
 		if platform != prevPlatform {
 			documentPlatforms[uri] = platform
-			notifyVersion(ctx, uri, version, platform)
+			notifyVersion(ctx, uri, version, platform, true)
 		}
 		return
 	}
@@ -70,21 +70,22 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 	yangDir := resolver.YangDirForVersion(version)
 	if info, err := os.Stat(yangDir); err == nil && info.IsDir() {
 		loadYangModel(ctx, uri, version, l, yangDir)
-		notifyVersion(ctx, uri, version, platform)
+		notifyVersion(ctx, uri, version, platform, true)
 	} else {
 		ctx.Notify("srpls/modelsNotFound", map[string]string{
 			"uri":     uri,
 			"version": version,
 		})
-		notifyVersion(ctx, uri, version, platform)
+		notifyVersion(ctx, uri, version, platform, false)
 	}
 }
 
-func notifyVersion(ctx *glsp.Context, uri, version, platform string) {
-	ctx.Notify("srpls/versionDetected", map[string]string{
-		"uri":      uri,
-		"version":  version,
-		"platform": platform,
+func notifyVersion(ctx *glsp.Context, uri, version, platform string, modelsLoaded bool) {
+	ctx.Notify("srpls/versionDetected", map[string]any{
+		"uri":          uri,
+		"version":      version,
+		"platform":     platform,
+		"modelsLoaded": modelsLoaded,
 	})
 }
 

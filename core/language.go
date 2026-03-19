@@ -106,6 +106,16 @@ type ModelPathResolver interface {
 	YangDirForVersion(version string) string
 }
 
+type PlatformProvider interface {
+	KnownPlatforms() []string
+}
+
+// HeaderEditor can rewrite version/platform directives in a document's header.
+type HeaderEditor interface {
+	SetVersionDirective(content, version string) string
+	SetPlatformDirective(content, platform string) string
+}
+
 type DefaultVersionProvider interface {
 	GetDefaultVersion() string
 }
