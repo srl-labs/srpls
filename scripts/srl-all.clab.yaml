@@ -16,6 +16,8 @@ topology:
       type: ixr-d2l
     7220-IXR-D3L:
       type: ixr-d3l
+    7220-IXR-D3:
+      type: ixr-d3
     7220-IXR-D4:
       type: ixr-d4
     7220-IXR-D5:
