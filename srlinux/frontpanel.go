@@ -85,6 +85,7 @@ func highlightPortByID(svg string, portID string) string {
 
 	el.RemoveAttr("style")
 	el.CreateAttr("fill", highlightColor)
+	el.CreateAttr("opacity", "0.5")
 
 	out, err := doc.WriteToString()
 	if err != nil {
