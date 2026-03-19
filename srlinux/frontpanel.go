@@ -35,22 +35,9 @@ func init() {
 		if err != nil {
 			continue
 		}
-		platform := strings.ToLower(filenameToPlatform(strings.TrimSuffix(e.Name(), ".svg")))
+		platform := strings.ToLower(strings.TrimSuffix(e.Name(), ".svg"))
 		chassisSVGs[platform] = string(data)
 	}
-}
-
-func filenameToPlatform(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-	replacer := strings.NewReplacer(" ", "-", "_", "-")
-	name = replacer.Replace(name)
-	for strings.Contains(name, "--") {
-		name = strings.ReplaceAll(name, "--", "-")
-	}
-	return strings.Trim(name, "-")
 }
 
 // RenderFrontPanel generates a markdown image of the platform front panel
