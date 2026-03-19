@@ -9,7 +9,31 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            runner: ubuntu-latest
+            nfpm_arch: x86_64
+          - goos: linux
+            goarch: arm64
+            runner: ubuntu-latest
+            nfpm_arch: arm64
+          - goos: darwin
+            goarch: amd64
+            runner: macos-14
+          - goos: darwin
+            goarch: arm64
+            runner: macos-14
+          - goos: windows
+            goarch: amd64
+            runner: ubuntu-latest
+          - goos: windows
+            goarch: arm64
+            runner: ubuntu-latest
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout repository
@@ -18,7 +42,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: WillAbides/setup-go-faster@v1.14.0
+        uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
@@ -32,30 +56,30 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
-      - name: Export build metadata
-        run: |
-          echo "VERSION=${{ github.event.release.tag_name }}" >>"$GITHUB_ENV"
-
-      - name: Build linux/amd64 binary
+      - name: Build binary
         run: |
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-            -o dist/srpls-linux-amd64 .
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${{ github.event.release.tag_name }}" \
+            -o "dist/srpls-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
 
-      - name: Build linux/arm64 binary
-        run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-          go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
-            -o dist/srpls-linux-arm64 .
+      - name: Install nfpm
+        if: matrix.nfpm_arch != ''
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
 
-      - name: Make binaries executable
+      - name: Build packages
+        if: matrix.nfpm_arch != ''
         run: |
-          chmod +x dist/srpls-linux-*
+          mkdir -p bin
+          cp "dist/srpls-${{ matrix.goos }}-${{ matrix.goarch }}" bin/srpls
+          ARCH=${{ matrix.nfpm_arch }} PLATFORM=${{ matrix.goos }} nfpm pkg -p deb -f nfpm.yaml -t dist/
+          ARCH=${{ matrix.nfpm_arch }} PLATFORM=${{ matrix.goos }} nfpm pkg -p rpm -f nfpm.yaml -t dist/
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/srpls-linux-amd64
-            dist/srpls-linux-arm64
+            dist/*

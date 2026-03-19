@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version    string = "0.1.0"
+	version    string = "0.1.2"
 	stdHandler protocol.Handler
 )
 
@@ -57,6 +57,7 @@ func main() {
 		TextDocumentSemanticTokensFull: core.TextDocumentSemanticTokensFull,
 		TextDocumentDidSave:            func(_ *glsp.Context, _ *protocol.DidSaveTextDocumentParams) error { return nil },
 		WorkspaceDidChangeWatchedFiles: func(_ *glsp.Context, _ *protocol.DidChangeWatchedFilesParams) error { return nil },
+		WorkspaceExecuteCommand:        core.WorkspaceExecuteCommand,
 	}
 
 	s := glspserver.NewServer(&stdHandler, core.AppName, false)

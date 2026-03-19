@@ -44,7 +44,7 @@ func (d *DefaultLanguage) DetectFormat(content string) ConfigFormat {
 		if trimmed == "" || d.IsComment(trimmed) {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "/") {
+		if strings.HasPrefix(trimmed, "/") || strings.HasPrefix(trimmed, "set /") {
 			return FormatFlat
 		}
 		return FormatBrace
@@ -81,10 +81,74 @@ func (d *DefaultLanguage) ParseBraceDocument(content string) map[int]ParsedLine 
 			continue
 		}
 
+		// Leaf-list values enclosed in [ ... ] — parse the keyword, skip values
+		if strings.HasSuffix(trimmed, "[") {
+			leafName := strings.TrimSpace(strings.TrimSuffix(trimmed, "["))
+			if leafName != "" {
+				pathTokens := make([]string, 0, len(stack)+1)
+				pathTokens = append(pathTokens, stack...)
+				pathTokens = append(pathTokens, leafName)
+				result[lineNum] = ParsedLine{
+					PathTokens:  pathTokens,
+					ParentDepth: len(stack),
+					LeafName:    leafName,
+					LineText:    line,
+				}
+			}
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				if strings.TrimSpace(lines[lineNum]) == "]" {
+					break
+				}
+			}
+			continue
+		}
+
+		// Multi-line strings — parse the keyword, skip string content
+		if strings.Count(trimmed, "\"")%2 != 0 {
+			tokens := TokenizeLine(trimmed)
+			if len(tokens) >= 1 {
+				leafName := tokens[0]
+				pathTokens := make([]string, 0, len(stack)+1)
+				pathTokens = append(pathTokens, stack...)
+				pathTokens = append(pathTokens, leafName)
+				result[lineNum] = ParsedLine{
+					PathTokens:  pathTokens,
+					ParentDepth: len(stack),
+					LeafName:    leafName,
+					LineText:    line,
+				}
+			}
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				if strings.Contains(lines[lineNum], "\"") {
+					break
+				}
+			}
+			continue
+		}
+
 		if trimmed == "}" {
 			if len(depthStack) > 0 {
 				stack = stack[:depthStack[len(depthStack)-1]]
 				depthStack = depthStack[:len(depthStack)-1]
+			}
+			continue
+		}
+
+		// Handle single-line inline blocks (e.g.: member "x" { }).
+		// These are net-zero for scope depth and must not pop parent stack.
+		if strings.Contains(trimmed, "{") && strings.Contains(trimmed, "}") &&
+			strings.Count(trimmed, "{") == strings.Count(trimmed, "}") {
+			blockPart := strings.TrimSpace(trimmed[:strings.Index(trimmed, "{")])
+			tokens := TokenizeLine(blockPart)
+			if len(tokens) >= 1 {
+				pathTokens := make([]string, 0, len(stack)+len(tokens))
+				pathTokens = append(pathTokens, stack...)
+				pathTokens = append(pathTokens, tokens...)
+				result[lineNum] = ParsedLine{
+					PathTokens:  pathTokens,
+					ParentDepth: len(stack),
+					LineText:    line,
+				}
 			}
 			continue
 		}
@@ -147,16 +211,43 @@ func (d *DefaultLanguage) ParseFlatDocument(content string) map[int]ParsedLine {
 	lines := strings.Split(content, "\n")
 	result := make(map[int]ParsedLine)
 
-	for lineNum, line := range lines {
+	for lineNum := 0; lineNum < len(lines); lineNum++ {
+		line := lines[lineNum]
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || d.IsComment(trimmed) {
 			continue
 		}
-		if !strings.HasPrefix(trimmed, "/") {
+
+		var body string
+		switch {
+		case strings.HasPrefix(trimmed, "set / "):
+			body = trimmed[6:]
+		case strings.HasPrefix(trimmed, "/"):
+			body = trimmed[1:]
+		default:
 			continue
 		}
 
-		body := trimmed[1:] // strip the root fwdslash (/)
+		// Skip multi-line strings (unclosed quote on this line)
+		if strings.Count(body, "\"")%2 != 0 {
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				if strings.Contains(lines[lineNum], "\"") {
+					break
+				}
+			}
+		}
+
+		// Strip inline leaf-list values: "keyword [ val1 val2 ]" → "keyword"
+		if bracketIdx := strings.Index(body, " ["); bracketIdx >= 0 {
+			body = strings.TrimSpace(body[:bracketIdx])
+		}
+
+		// Strip quoted value from body for tokenization
+		if quoteIdx := strings.Index(body, "\""); quoteIdx >= 0 {
+			body = strings.TrimSpace(body[:quoteIdx])
+		}
+
+		body = strings.TrimSpace(body)
 		tokens := TokenizeLine(body)
 		if len(tokens) == 0 {
 			continue
@@ -176,6 +267,160 @@ func (d *DefaultLanguage) ParseDocument(content string) map[int]ParsedLine {
 		return d.ParseFlatDocument(content)
 	}
 	return d.ParseBraceDocument(content)
+}
+
+// ParseDocumentWithModel parses the document using the YANG model for
+// schema-aware tokenization of flat-format lines.
+func (d *DefaultLanguage) ParseDocumentWithModel(content string, ym *yang.Model) map[int]ParsedLine {
+	if d.DetectFormat(content) == FormatFlat {
+		return d.ParseFlatDocumentWithModel(content, ym)
+	}
+	return d.ParseBraceDocument(content)
+}
+
+// ParseFlatDocumentWithModel parses flat-format config using the YANG model
+// to correctly identify path tokens, leaf names, and leaf values.
+func (d *DefaultLanguage) ParseFlatDocumentWithModel(content string, ym *yang.Model) map[int]ParsedLine {
+	if ym == nil {
+		return d.ParseFlatDocument(content)
+	}
+
+	lines := strings.Split(content, "\n")
+	result := make(map[int]ParsedLine)
+
+	for lineNum := 0; lineNum < len(lines); lineNum++ {
+		line := lines[lineNum]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || d.IsComment(trimmed) {
+			continue
+		}
+
+		var body string
+		switch {
+		case strings.HasPrefix(trimmed, "set / "):
+			body = trimmed[6:]
+		case strings.HasPrefix(trimmed, "/"):
+			body = trimmed[1:]
+		default:
+			continue
+		}
+
+		startLineNum := lineNum
+
+		// Handle multi-line strings (unclosed quote on this line)
+		if strings.Count(body, "\"")%2 != 0 {
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				body += "\n" + lines[lineNum]
+				if strings.Contains(lines[lineNum], "\"") {
+					break
+				}
+			}
+		}
+
+		pl := parseFlatLineWithModel(body, line, ym)
+		result[startLineNum] = pl
+	}
+	return result
+}
+
+// parseFlatLineWithModel walks the YANG tree to classify tokens in a flat line.
+func parseFlatLineWithModel(body string, lineText string, ym *yang.Model) ParsedLine {
+	children := yang.FlattenChoices(ym.Root)
+	var pathTokens []string
+	var leafName, leafValue string
+
+	rest := strings.TrimSpace(body)
+
+	for rest != "" {
+		tok, tokEnd := nextToken(rest)
+		if tok == "" {
+			break
+		}
+		rest = strings.TrimSpace(rest[tokEnd:])
+
+		// Leaf-list bracket — collect values
+		if tok == "[" {
+			var vals []string
+			for rest != "" {
+				v, vEnd := nextToken(rest)
+				rest = strings.TrimSpace(rest[vEnd:])
+				if v == "]" {
+					break
+				}
+				vals = append(vals, v)
+			}
+			leafValue = "[ " + strings.Join(vals, " ") + " ]"
+			break
+		}
+
+		entry, ok := children[tok]
+		if !ok {
+			// Unknown token — treat remaining as opaque value
+			pathTokens = append(pathTokens, tok)
+			if rest != "" {
+				leafValue = rest
+				rest = ""
+			}
+			break
+		}
+
+		pathTokens = append(pathTokens, tok)
+
+		switch {
+		case entry.Kind == goyang.DirectoryEntry && entry.IsList():
+			// Consume key value tokens
+			keyCount := listKeyTokenCount(entry)
+			for k := 0; k < keyCount && rest != ""; k++ {
+				keyTok, keyEnd := nextToken(rest)
+				if keyTok == "" {
+					break
+				}
+				pathTokens = append(pathTokens, keyTok)
+				rest = strings.TrimSpace(rest[keyEnd:])
+			}
+			if entry.Dir != nil {
+				children = yang.FlattenChoices(entry.Dir)
+			}
+
+		case entry.Kind == goyang.DirectoryEntry:
+			if entry.Dir != nil {
+				children = yang.FlattenChoices(entry.Dir)
+			}
+
+		case entry.Kind == goyang.LeafEntry:
+			leafName = tok
+			leafValue = utils.StripQuotes(strings.TrimSpace(rest))
+			rest = ""
+		}
+	}
+
+	return ParsedLine{
+		PathTokens:  pathTokens,
+		ParentDepth: 0,
+		LeafName:    leafName,
+		LeafValue:   leafValue,
+		LineText:    lineText,
+	}
+}
+
+// nextToken extracts the next whitespace-delimited or quoted token from s.
+// Returns the token value and the byte offset past the token in s.
+func nextToken(s string) (string, int) {
+	if len(s) == 0 {
+		return "", 0
+	}
+	if s[0] == '"' {
+		end := strings.Index(s[1:], "\"")
+		if end >= 0 {
+			return s[1 : end+1], end + 2
+		}
+		return s[1:], len(s)
+	}
+	end := strings.IndexAny(s, " \t")
+	if end < 0 {
+		return s, len(s)
+	}
+	return s[:end], end
 }
 
 func (d *DefaultLanguage) ContextAtCursor(content string, line, character uint32) CompletionContext {
@@ -209,6 +454,26 @@ func (d *DefaultLanguage) BraceContextAtCursor(content string, line, character u
 		}
 
 		if trimmed == "exit" || trimmed == "exit all" {
+			continue
+		}
+
+		// Skip leaf-list values enclosed in [ ... ]
+		if strings.HasSuffix(trimmed, "[") {
+			for i++; i < int(line) && i < len(lines); i++ {
+				if strings.TrimSpace(lines[i]) == "]" {
+					break
+				}
+			}
+			continue
+		}
+
+		// Skip multi-line strings (opening " without closing " on the same line)
+		if strings.Count(trimmed, "\"")%2 != 0 {
+			for i++; i < int(line) && i < len(lines); i++ {
+				if strings.Contains(lines[i], "\"") {
+					break
+				}
+			}
 			continue
 		}
 
@@ -313,8 +578,17 @@ func (d *DefaultLanguage) FlatContextAtCursor(content string, line, character ui
 		return CompletionContext{Format: FormatFlat}
 	}
 
-	hasLeader := strings.HasPrefix(lineText, "/")
-	lineText = strings.TrimPrefix(lineText, "/")
+	hasLeader := strings.HasPrefix(lineText, "/") || strings.HasPrefix(lineText, "set /")
+	if strings.HasPrefix(lineText, "set / ") {
+		lineText = lineText[6:]
+	} else {
+		lineText = strings.TrimPrefix(lineText, "/")
+	}
+
+	// Strip inline leaf-list content
+	if bracketIdx := strings.Index(lineText, " ["); bracketIdx >= 0 {
+		lineText = strings.TrimSpace(lineText[:bracketIdx])
+	}
 
 	tokens := TokenizeLine(lineText)
 
@@ -339,7 +613,7 @@ func (d *DefaultLanguage) FlatContextAtCursor(content string, line, character ui
 	}
 }
 
-func (d *DefaultLanguage) ValidateLine(pl ParsedLine, lineNum uint32, ym *yang.Model) []protocol.Diagnostic {
+func (d *DefaultLanguage) ValidateLine(pl ParsedLine, lineNum uint32, ym *yang.Model, content string) []protocol.Diagnostic {
 	sev := protocol.DiagnosticSeverityError
 	src := AppName
 	tokens := pl.PathTokens
@@ -371,16 +645,52 @@ func (d *DefaultLanguage) ValidateLine(pl ParsedLine, lineNum uint32, ym *yang.M
 			if i >= len(tokens) {
 				break
 			}
-			keyVal := tokens[i]
 
+			// validate all key values for compound keys
+			keys := strings.Fields(entry.Key)
 			if i-1 >= pl.ParentDepth {
-				keyStart, keyEnd := utils.SafePosition(line, keyVal)
-				if diag := ValidateKeyType(entry, keyVal, lineNum, keyStart, keyEnd); diag != nil {
-					return []protocol.Diagnostic{*diag}
+				keyIdx := i // first key value token
+				for k, keyName := range keys {
+					valIdx := keyIdx
+					if k > 0 {
+						valIdx++ // skip the key keyword token
+					}
+					if valIdx >= len(tokens) {
+						break
+					}
+					keyVal := tokens[valIdx]
+					keyStart, keyEnd := utils.SafePosition(line, keyVal)
+
+					// validate against YANG type
+					if entry.Dir != nil {
+						if keyLeaf, ok := entry.Dir[keyName]; ok && keyLeaf != nil && keyLeaf.Type != nil {
+							if diag := ValidateValueAgainstType(keyLeaf.Type, keyVal, lineNum, keyStart, keyEnd); diag != nil {
+								return []protocol.Diagnostic{*diag}
+							}
+						}
+					}
+
+					// validate against hints (first key only)
+					if k == 0 && d.Owner != nil {
+						if hv, ok := d.Owner.(HintValidator); ok {
+							sp := schemaPath(entry)
+							if diag := hv.ValidateHint(sp, keyVal, content, lineNum, keyStart, keyEnd); diag != nil {
+								return []protocol.Diagnostic{*diag}
+							}
+						}
+					}
+
+					if k == 0 {
+						keyIdx++
+					} else {
+						keyIdx += 2
+					}
 				}
 			}
 
-			i++
+			// skip key tokens: first key is 1 token (value only),
+			// each additional key is 2 tokens (keyword + value)
+			i += listKeyTokenCount(entry)
 			if entry.Dir != nil {
 				current = yang.FlattenChoices(entry.Dir)
 			} else {
@@ -399,7 +709,8 @@ func (d *DefaultLanguage) ValidateLine(pl ParsedLine, lineNum uint32, ym *yang.M
 			if value == "" && i < len(tokens) {
 				value = tokens[i]
 			}
-			if value != "" {
+			// Skip validation for leaf-list bracket values
+			if value != "" && !strings.HasPrefix(value, "[") {
 				valStart, valEnd := utils.SafePosition(line, value)
 				if diag := ValidateLeafValue(entry, value, lineNum, valStart, valEnd); diag != nil {
 					return []protocol.Diagnostic{*diag}
@@ -589,7 +900,8 @@ func (d *DefaultLanguage) buildBlockTree(content string) []*blockRange {
 	var stack []*blockRange
 	skipDepth := 0
 
-	for lineNum, line := range lines {
+	for lineNum := 0; lineNum < len(lines); lineNum++ {
+		line := lines[lineNum]
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || d.IsComment(trimmed) {
 			continue
@@ -608,6 +920,26 @@ func (d *DefaultLanguage) buildBlockTree(content string) []*blockRange {
 			continue
 		}
 
+		// Skip leaf-list values enclosed in [ ... ]
+		if strings.HasSuffix(trimmed, "[") {
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				if strings.TrimSpace(lines[lineNum]) == "]" {
+					break
+				}
+			}
+			continue
+		}
+
+		// Skip multi-line strings (opening " without closing " on the same line)
+		if strings.Count(trimmed, "\"")%2 != 0 {
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				if strings.Contains(lines[lineNum], "\"") {
+					break
+				}
+			}
+			continue
+		}
+
 		if trimmed == "}" {
 			if len(stack) > 0 {
 				stack[len(stack)-1].endLine = lineNum
@@ -618,6 +950,9 @@ func (d *DefaultLanguage) buildBlockTree(content string) []*blockRange {
 
 		if strings.HasSuffix(trimmed, "{") {
 			blockName := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
+			if blockName == "" {
+				blockName = "{}"
+			}
 			br := &blockRange{
 				name:      blockName,
 				startLine: lineNum,
@@ -643,7 +978,7 @@ func (d *DefaultLanguage) buildBlockTree(content string) []*blockRange {
 		}
 
 		tokens := TokenizeLine(trimmed)
-		if len(tokens) >= 1 {
+		if len(tokens) >= 1 && tokens[0] != "" {
 			le := leafEntry{
 				name: tokens[0],
 				line: lineNum,
@@ -718,7 +1053,7 @@ func (d *DefaultLanguage) flatDocumentSymbols(content string) []protocol.Documen
 	var symbols []protocol.DocumentSymbol
 	for lineNum, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || d.IsComment(trimmed) || !strings.HasPrefix(trimmed, "/") {
+		if trimmed == "" || d.IsComment(trimmed) || (!strings.HasPrefix(trimmed, "/") && !strings.HasPrefix(trimmed, "set /")) {
 			continue
 		}
 		kind := protocol.SymbolKindProperty

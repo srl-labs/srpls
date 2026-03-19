@@ -28,7 +28,7 @@ type Language interface {
 	IsComment(trimmed string) bool
 	DetectFormat(content string) ConfigFormat
 	ParseDocument(content string) map[int]ParsedLine
-	ValidateLine(line ParsedLine, lineNum uint32, ym *yang.Model) []protocol.Diagnostic
+	ValidateLine(line ParsedLine, lineNum uint32, ym *yang.Model, content string) []protocol.Diagnostic
 }
 
 // ConfigFormat represents the syntax style of a config document.
@@ -54,11 +54,29 @@ type Completer interface {
 }
 
 type ValueHinter interface {
-	ValueHints(schemaPath string) []string
+	ValueHints(schemaPath string, content string) []string
+	// HintDetail returns optional detail text shown alongside hint completions.
+	HintDetail(schemaPath string, content string) string
+}
+
+type ListKeyQuoter interface {
+	QuotesListKeys() bool
+}
+
+// HintValidator validates list key values against language-specific hints.
+// Returns a diagnostic if the value is invalid, nil if valid or no validation applies.
+type HintValidator interface {
+	ValidateHint(schemaPath string, value string, content string, lineNum, start, end uint32) *protocol.Diagnostic
 }
 
 type DocumentValidator interface {
 	ValidateDocument(content string) []protocol.Diagnostic
+}
+
+// SchemaAwareParser can parse documents using the YANG model to correctly
+// identify path tokens, leaf names, and leaf values in flat-format config.
+type SchemaAwareParser interface {
+	ParseDocumentWithModel(content string, ym *yang.Model) map[int]ParsedLine
 }
 
 type VersionDetector interface {
@@ -73,12 +91,29 @@ type FoldingProvider interface {
 	FoldingRanges(content string) []protocol.FoldingRange
 }
 
+// FrontPanelRenderer generates a front panel image for hover.
+type FrontPanelRenderer interface {
+	// RenderFrontPanel returns a markdown image string (data URI) with the
+	// given interface highlighted, or "" if not applicable.
+	RenderFrontPanel(interfaceName string, content string) string
+}
+
 type Formatter interface {
 	FormatDocument(content string, options protocol.FormattingOptions) []protocol.TextEdit
 }
 
 type ModelPathResolver interface {
 	YangDirForVersion(version string) string
+}
+
+type PlatformProvider interface {
+	KnownPlatforms() []string
+}
+
+// HeaderEditor can rewrite version/platform directives in a document's header.
+type HeaderEditor interface {
+	SetVersionDirective(content, version string) string
+	SetPlatformDirective(content, platform string) string
 }
 
 type DefaultVersionProvider interface {
@@ -91,17 +126,31 @@ type DefaultLanguage struct {
 	LangRootModules   []string
 	CommentPrefixes   []string         // ["#"], ["#", "//"]
 	SkipBlockPrefixes []string         // ["persistent-indices"] for sros
+	FlatPrefix        string           // "set / " for SR Linux, "/" for SR OS
 	VersionPatterns   []*regexp.Regexp // regexes with one capture group for version
 	YangDirBase       string           // the subdir UNDER ~/.srpls
 	YangDirFilePrefix string
 	DefaultVersion    string // fallback version when we can't extract with versionpattern from the doc
 	Hints             map[string][]string
+	QuoteListKeys     bool // whether string list keys should be quoted (e.g. false for SR Linux)
+
+	// Owner points back to the embedding Language so DefaultLanguage methods
+	// can check interfaces implemented on the outer type (e.g. HintValidator).
+	Owner Language
 }
 
+func (d *DefaultLanguage) SetOwner(l Language)       { d.Owner = l }
 func (d *DefaultLanguage) Name() string              { return d.LangName }
 func (d *DefaultLanguage) SkipDirs() map[string]bool { return d.LangSkipDirs }
 func (d *DefaultLanguage) RootModules() []string     { return d.LangRootModules }
 func (d *DefaultLanguage) GetDefaultVersion() string { return d.DefaultVersion }
+
+func (d *DefaultLanguage) FlatLinePrefix() string {
+	if d.FlatPrefix != "" {
+		return d.FlatPrefix
+	}
+	return "set / "
+}
 
 func (d *DefaultLanguage) YangDirForVersion(version string) string {
 	home, _ := os.UserHomeDir()
@@ -123,12 +172,16 @@ func (d *DefaultLanguage) DetectVersion(content string) string {
 	return ""
 }
 
-func (d *DefaultLanguage) ValueHints(schemaPath string) []string {
+func (d *DefaultLanguage) QuotesListKeys() bool { return d.QuoteListKeys }
+
+func (d *DefaultLanguage) ValueHints(schemaPath string, _ string) []string {
 	if d.Hints == nil {
 		return nil
 	}
 	return d.Hints[schemaPath]
 }
+
+func (d *DefaultLanguage) HintDetail(_ string, _ string) string { return "" }
 
 func (d *DefaultLanguage) IsComment(trimmed string) bool {
 	for _, p := range d.CommentPrefixes {

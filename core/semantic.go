@@ -16,6 +16,8 @@ const (
 	tokenLeaf
 	tokenKey
 	tokenValue
+	tokenString
+	tokenComment
 )
 
 // map the YANG constructs to vscode semantic token types
@@ -25,6 +27,8 @@ var SemanticTokenTypes = []string{
 	"property", // leaf
 	"string",   // key
 	"number",   // value
+	"string",   // string (multi-line)
+	"comment",  // comment
 }
 
 func TextDocumentSemanticTokensFull(_ *glsp.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
@@ -37,15 +41,81 @@ func TextDocumentSemanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 	lines := strings.Split(doc.Content, "\n")
 	format := doc.Lang.DetectFormat(doc.Content)
 
+	var parsed map[int]ParsedLine
+	if format == FormatBrace {
+		if sap, ok := doc.Lang.(SchemaAwareParser); ok && doc.Model != nil {
+			parsed = sap.ParseDocumentWithModel(doc.Content, doc.Model)
+		} else {
+			parsed = doc.Lang.ParseDocument(doc.Content)
+		}
+	}
+
 	var enc tokenEncoder
 
-	for lineNum, line := range lines {
+	for lineNum := 0; lineNum < len(lines); lineNum++ {
+		line := lines[lineNum]
 		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || trimmed == "}" {
+		if trimmed == "" || trimmed == "}" || trimmed == "]" {
 			continue
 		}
 
 		if doc.Lang.IsComment(trimmed) {
+			enc.add(uint32(lineNum), uint32(strings.Index(line, strings.TrimSpace(line))), uint32(len(trimmed)), tokenComment)
+			continue
+		}
+
+		// Leaf-list values in [ ... ] — emit keyword for the leaf name
+		if strings.HasSuffix(trimmed, "[") {
+			leafName := strings.TrimSpace(strings.TrimSuffix(trimmed, "["))
+			if leafName != "" {
+				leafOffset := uint32(strings.Index(line, leafName))
+				enc.add(uint32(lineNum), leafOffset, uint32(len(leafName)), tokenLeaf)
+			}
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				inner := strings.TrimSpace(lines[lineNum])
+				if inner == "]" {
+					break
+				}
+				if inner != "" {
+					offset := uint32(strings.Index(lines[lineNum], inner))
+					enc.add(uint32(lineNum), offset, uint32(len(inner)), tokenValue)
+				}
+			}
+			continue
+		}
+
+		// Multi-line strings — encode path tokens normally, then string for content
+		if strings.Count(trimmed, "\"")%2 != 0 {
+			quoteIdx := strings.Index(line, "\"")
+			if quoteIdx > 0 {
+				// Encode the path portion before the quote using the normal encoder
+				pathLine := line[:quoteIdx]
+				switch format {
+				case FormatFlat:
+					encodeFlatLine(&enc, doc.Model, pathLine, uint32(lineNum))
+				case FormatBrace:
+					if pl, ok := parsed[lineNum]; ok {
+						encodeBraceLine(&enc, doc.Model, parsed, pathLine, uint32(lineNum))
+						_ = pl
+					}
+				}
+				// Emit the quoted string portion
+				enc.add(uint32(lineNum), uint32(quoteIdx), uint32(len(line)-quoteIdx), tokenString)
+			}
+			for lineNum++; lineNum < len(lines); lineNum++ {
+				innerLine := lines[lineNum]
+				if strings.Contains(innerLine, "\"") {
+					inner := strings.TrimRight(innerLine, " \t")
+					if len(inner) > 0 {
+						enc.add(uint32(lineNum), 0, uint32(len(inner)), tokenString)
+					}
+					break
+				}
+				inner := strings.TrimRight(innerLine, " \t")
+				if len(inner) > 0 {
+					enc.add(uint32(lineNum), 0, uint32(len(inner)), tokenString)
+				}
+			}
 			continue
 		}
 
@@ -53,7 +123,7 @@ func TextDocumentSemanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 		case FormatFlat:
 			encodeFlatLine(&enc, doc.Model, line, uint32(lineNum))
 		case FormatBrace:
-			encodeBraceLine(&enc, doc.Model, doc.Content, line, uint32(lineNum))
+			encodeBraceLine(&enc, doc.Model, parsed, line, uint32(lineNum))
 		}
 	}
 
@@ -62,13 +132,18 @@ func TextDocumentSemanticTokensFull(_ *glsp.Context, params *protocol.SemanticTo
 
 func encodeFlatLine(enc *tokenEncoder, model *yang.Model, line string, lineNum uint32) {
 	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "/") {
+
+	var slashPos int
+	if strings.HasPrefix(trimmed, "set / ") {
+		slashPos = strings.Index(line, "set / ") + 4
+	} else if strings.HasPrefix(trimmed, "/") {
+		slashPos = strings.Index(line, "/")
+	} else {
 		return
 	}
 
-	slashPos := uint32(strings.Index(line, "/"))
 	rest := line[slashPos+1:]
-	offset := slashPos + 1
+	var offset uint32
 
 	children := yang.FlattenChoices(model.Root)
 
@@ -100,11 +175,40 @@ func encodeFlatLine(enc *tokenEncoder, model *yang.Model, line string, lineNum u
 			}
 		}
 
+		// Inline leaf-list: [ val1 val2 ... ]
+		if tok == "[" {
+			enc.add(lineNum, offset, 1, tokenValue)
+			rest = rest[1:]
+			for rest != "" {
+				rest = strings.TrimLeft(rest, " \t")
+				offset = uint32(len(line)) - uint32(len(rest))
+				if rest == "" {
+					break
+				}
+				end := strings.IndexAny(rest, " \t")
+				var valTok string
+				var valLen uint32
+				if end < 0 {
+					valTok = rest
+					valLen = uint32(len(rest))
+				} else {
+					valTok = rest[:end]
+					valLen = uint32(end)
+				}
+				if valTok == "]" {
+					enc.add(lineNum, offset, 1, tokenValue)
+					break
+				}
+				enc.add(lineNum, offset, valLen, tokenValue)
+				rest = rest[valLen:]
+			}
+			return
+		}
+
 		entry, ok := children[tok]
 		if !ok {
 			enc.add(lineNum, offset, tokLen, tokenValue)
 			rest = rest[tokLen:]
-			offset += tokLen
 			continue
 		}
 
@@ -112,32 +216,36 @@ func encodeFlatLine(enc *tokenEncoder, model *yang.Model, line string, lineNum u
 		case entry.Kind == goyang.DirectoryEntry && entry.IsList():
 			enc.add(lineNum, offset, tokLen, tokenList)
 			rest = rest[tokLen:]
-			offset += tokLen
 
-			rest = strings.TrimLeft(rest, " \t")
-			offset = uint32(len(line)) - uint32(len(rest))
-			if rest == "" {
-				break
-			}
-			var keyLen uint32
-			if rest[0] == '"' {
-				end := strings.Index(rest[1:], "\"")
-				if end >= 0 {
-					keyLen = uint32(end + 2)
-				} else {
+			// Color all key tokens (compound keys have multiple)
+			keySkip := listKeyTokenCount(entry)
+			for k := 0; k < keySkip; k++ {
+				rest = strings.TrimLeft(rest, " \t")
+				offset = uint32(len(line)) - uint32(len(rest))
+				if rest == "" {
 					break
 				}
-			} else {
-				end := strings.IndexAny(rest, " \t")
-				if end < 0 {
-					keyLen = uint32(len(rest))
+				var keyLen uint32
+				if rest[0] == '"' {
+					end := strings.Index(rest[1:], "\"")
+					if end >= 0 {
+						keyLen = uint32(end + 2)
+					} else {
+						break
+					}
 				} else {
-					keyLen = uint32(end)
+					end := strings.IndexAny(rest, " \t")
+					if end < 0 {
+						keyLen = uint32(len(rest))
+					} else {
+						keyLen = uint32(end)
+					}
+				}
+				if keyLen > 0 {
+					enc.add(lineNum, offset, keyLen, tokenKey)
+					rest = rest[keyLen:]
 				}
 			}
-			enc.add(lineNum, offset, keyLen, tokenKey)
-			rest = rest[keyLen:]
-			offset += keyLen
 
 			if entry.Dir != nil {
 				children = yang.FlattenChoices(entry.Dir)
@@ -146,7 +254,6 @@ func encodeFlatLine(enc *tokenEncoder, model *yang.Model, line string, lineNum u
 		case entry.Kind == goyang.DirectoryEntry:
 			enc.add(lineNum, offset, tokLen, tokenContainer)
 			rest = rest[tokLen:]
-			offset += tokLen
 			if entry.Dir != nil {
 				children = yang.FlattenChoices(entry.Dir)
 			}
@@ -154,7 +261,6 @@ func encodeFlatLine(enc *tokenEncoder, model *yang.Model, line string, lineNum u
 		case entry.Kind == goyang.LeafEntry:
 			enc.add(lineNum, offset, tokLen, tokenLeaf)
 			rest = rest[tokLen:]
-			offset += tokLen
 
 			val := strings.TrimSpace(rest)
 			if val != "" {
@@ -166,12 +272,11 @@ func encodeFlatLine(enc *tokenEncoder, model *yang.Model, line string, lineNum u
 	}
 }
 
-func encodeBraceLine(enc *tokenEncoder, model *yang.Model, content, line string, lineNum uint32) {
-	parsed := parseBraceDocumentForSemantic(content, line, lineNum)
-	if parsed == nil {
+func encodeBraceLine(enc *tokenEncoder, model *yang.Model, parsed map[int]ParsedLine, line string, lineNum uint32) {
+	pl, ok := parsed[int(lineNum)]
+	if !ok {
 		return
 	}
-	pl := *parsed
 
 	children := yang.FlattenChoices(model.Root)
 
@@ -182,7 +287,7 @@ func encodeBraceLine(enc *tokenEncoder, model *yang.Model, content, line string,
 		}
 		switch {
 		case entry.Kind == goyang.DirectoryEntry && entry.IsList():
-			i++
+			i += listKeyTokenCount(entry)
 			if entry.Dir != nil {
 				children = yang.FlattenChoices(entry.Dir)
 			}
@@ -240,8 +345,9 @@ func encodeBraceLine(enc *tokenEncoder, model *yang.Model, content, line string,
 			enc.add(lineNum, offset, tokLen, tokenList)
 			rest = rest[tokLen:]
 
-			// next token is key
-			if i+1 < len(lineTokens) {
+			// colorize all key tokens (compound keys have multiple)
+			keySkip := listKeyTokenCount(entry)
+			for k := 0; k < keySkip && i+1 < len(lineTokens); k++ {
 				i++
 				rest = strings.TrimLeft(rest, " \t")
 				offset = uint32(len(line)) - uint32(len(rest))
@@ -288,16 +394,6 @@ func encodeBraceLine(enc *tokenEncoder, model *yang.Model, content, line string,
 			return
 		}
 	}
-}
-
-func parseBraceDocumentForSemantic(content, line string, lineNum uint32) *ParsedLine {
-	d := &DefaultLanguage{}
-	parsed := d.ParseBraceDocument(content)
-	pl, ok := parsed[int(lineNum)]
-	if !ok {
-		return nil
-	}
-	return &pl
 }
 
 type tokenEncoder struct {

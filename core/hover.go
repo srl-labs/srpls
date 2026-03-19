@@ -18,7 +18,12 @@ func TextDocumentHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return nil, nil
 	}
 
-	parsed := doc.Lang.ParseDocument(doc.Content)
+	var parsed map[int]ParsedLine
+	if sap, ok := doc.Lang.(SchemaAwareParser); ok && doc.Model != nil {
+		parsed = sap.ParseDocumentWithModel(doc.Content, doc.Model)
+	} else {
+		parsed = doc.Lang.ParseDocument(doc.Content)
+	}
 	pl, ok := parsed[int(params.Position.Line)]
 	if !ok {
 		return nil, nil
@@ -40,7 +45,15 @@ func TextDocumentHover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		return hoverForLeafValue(entry, line, wordStart, wordEnd), nil
 	}
 
-	return hoverForEntry(entry, line, wordStart, wordEnd), nil
+	// If hovering over a list key value, render the front panel
+	var frontPanel string
+	if entry.Kind == goyang.DirectoryEntry && entry.IsList() {
+		if fpr, ok := doc.Lang.(FrontPanelRenderer); ok {
+			frontPanel = fpr.RenderFrontPanel(word, doc.Content)
+		}
+	}
+
+	return hoverForEntry(entry, line, wordStart, wordEnd, frontPanel), nil
 }
 
 func resolveHoverEntry(doc *DocumentContext, pl ParsedLine, word string) *goyang.Entry {
@@ -63,9 +76,14 @@ func resolveHoverEntry(doc *DocumentContext, pl ParsedLine, word string) *goyang
 
 		switch {
 		case entry.Kind == goyang.DirectoryEntry && entry.IsList():
-			if i < len(tokens) {
-				i++
+			keyCount := listKeyTokenCount(entry)
+			// Check if the hovered word is one of the key value tokens
+			for k := 0; k < keyCount && i+k < len(tokens); k++ {
+				if tokens[i+k] == word {
+					return entry
+				}
 			}
+			i += keyCount
 			if entry.Dir != nil {
 				children = yang.FlattenChoices(entry.Dir)
 			} else {
@@ -87,7 +105,7 @@ func resolveHoverEntry(doc *DocumentContext, pl ParsedLine, word string) *goyang
 	return lastEntry
 }
 
-func hoverForEntry(entry *goyang.Entry, line, start, end uint32) *protocol.Hover {
+func hoverForEntry(entry *goyang.Entry, line, start, end uint32, frontPanel string) *protocol.Hover {
 	var parts []string
 
 	kind := "container"
@@ -104,6 +122,10 @@ func hoverForEntry(entry *goyang.Entry, line, start, end uint32) *protocol.Hover
 
 	if entry.Description != "" {
 		parts = append(parts, entry.Description)
+	}
+
+	if frontPanel != "" {
+		parts = append(parts, frontPanel)
 	}
 
 	content := strings.Join(parts, "\n\n")

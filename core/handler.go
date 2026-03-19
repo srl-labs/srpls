@@ -14,6 +14,17 @@ var documentStore = make(map[string]string)
 var documentLangs = make(map[string]Language)
 
 var DocumentVersions = make(map[string]string)
+var documentPlatforms = make(map[string]string)
+
+func detectPlatform(content string, l Language) string {
+	type platformDetector interface {
+		DetectPlatform(content string) string
+	}
+	if pd, ok := l.(platformDetector); ok {
+		return pd.DetectPlatform(content)
+	}
+	return ""
+}
 
 func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) {
 	vd, ok := l.(VersionDetector)
@@ -38,9 +49,16 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 		return
 	}
 
+	platform := detectPlatform(content, l)
+
 	prev := DocumentVersions[uri]
+	prevPlatform := documentPlatforms[uri]
 	if prev == version {
 		scheduler.schedule(ctx, uri, content, l, version)
+		if platform != prevPlatform {
+			documentPlatforms[uri] = platform
+			notifyVersion(ctx, uri, version, platform, true)
+		}
 		return
 	}
 
@@ -48,23 +66,27 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 	if !ok {
 		return
 	}
+	documentPlatforms[uri] = platform
 	yangDir := resolver.YangDirForVersion(version)
 	if info, err := os.Stat(yangDir); err == nil && info.IsDir() {
 		loadYangModel(ctx, uri, version, l, yangDir)
-		ctx.Notify("srpls/versionDetected", map[string]string{
-			"uri":     uri,
-			"version": version,
-		})
+		notifyVersion(ctx, uri, version, platform, true)
 	} else {
 		ctx.Notify("srpls/modelsNotFound", map[string]string{
 			"uri":     uri,
 			"version": version,
 		})
-		ctx.Notify("srpls/versionDetected", map[string]string{
-			"uri":     uri,
-			"version": version,
-		})
+		notifyVersion(ctx, uri, version, platform, false)
 	}
+}
+
+func notifyVersion(ctx *glsp.Context, uri, version, platform string, modelsLoaded bool) {
+	ctx.Notify("srpls/versionDetected", map[string]any{
+		"uri":          uri,
+		"version":      version,
+		"platform":     platform,
+		"modelsLoaded": modelsLoaded,
+	})
 }
 
 func TextDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
@@ -109,6 +131,7 @@ func TextDocumentDidClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	delete(documentStore, uri)
 	delete(documentLangs, uri)
 	delete(DocumentVersions, uri)
+	delete(documentPlatforms, uri)
 	ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Diagnostics: []protocol.Diagnostic{},

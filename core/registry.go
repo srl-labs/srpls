@@ -8,6 +8,11 @@ var (
 )
 
 func Register(l Language) {
+	// Set Owner so DefaultLanguage methods can access the outer type's interfaces.
+	type ownable interface{ SetOwner(Language) }
+	if o, ok := l.(ownable); ok {
+		o.SetOwner(l)
+	}
 	Registry = append(Registry, l)
 }
 
