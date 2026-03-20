@@ -39,6 +39,7 @@ func ValidateLeafValue(entry *goyang.Entry, val string, lineNum, start, end uint
 }
 
 func ValidateValueAgainstType(t *goyang.YangType, val string, lineNum, start, end uint32) *protocol.Diagnostic {
+	val = utils.StripQuotes(val)
 	sev := protocol.DiagnosticSeverityError
 	src := AppName
 

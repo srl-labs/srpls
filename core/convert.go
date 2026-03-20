@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/srl-labs/srpls/utils"
 	"github.com/srl-labs/srpls/yang"
 
 	goyang "github.com/openconfig/goyang/pkg/yang"
@@ -348,7 +347,7 @@ func splitFlatLineWithModel(body string, ym *yang.Model) (containerPath []string
 
 		case entry.Kind == goyang.LeafEntry:
 			// Leaf: name + remaining value
-			val := utils.StripQuotes(strings.TrimSpace(afterTok))
+			val := strings.TrimSpace(afterTok)
 			if val != "" {
 				leafPart = tok + " " + strings.TrimSpace(afterTok)
 			} else {
