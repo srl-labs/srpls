@@ -16,8 +16,6 @@ builds:
 
 archives:
   - format: binary
-  - id: unversioned
-    format: binary
     name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
 
 nfpms:
