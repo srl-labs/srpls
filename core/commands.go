@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/srl-labs/srpls/yang"
 
@@ -96,6 +97,13 @@ func handleConvert(args []any) (any, error) {
 		return nil, fmt.Errorf("second argument must be content string")
 	}
 
+	cursorLine := -1
+	if len(args) >= 3 {
+		if cl, ok := args[2].(float64); ok {
+			cursorLine = int(cl)
+		}
+	}
+
 	lang := documentLangs[uri]
 	if lang == nil {
 		return nil, fmt.Errorf("no language found for URI")
@@ -107,19 +115,65 @@ func handleConvert(args []any) (any, error) {
 	}
 
 	format := lang.DetectFormat(content)
+	version := DocumentVersions[uri]
+	ym := GetYangModel(lang, version)
 
-	switch format {
-	case FormatFlat:
-		version := DocumentVersions[uri]
-		ym := GetYangModel(lang, version)
-		if ym != nil {
-			return conv.UnflattenWithModel(content, ym), nil
+	// Get path tokens at cursor line before conversion
+	var cursorPath []string
+	if cursorLine >= 0 {
+		var parsed map[int]ParsedLine
+		if sap, ok := lang.(SchemaAwareParser); ok && ym != nil {
+			parsed = sap.ParseDocumentWithModel(content, ym)
+		} else {
+			parsed = lang.ParseDocument(content)
 		}
-		return conv.Unflatten(content), nil
-
-	case FormatBrace:
-		return conv.Flatten(content), nil
+		for line := cursorLine; line >= 0; line-- {
+			if pl, ok := parsed[line]; ok {
+				cursorPath = pl.PathTokens
+				break
+			}
+		}
 	}
 
-	return nil, fmt.Errorf("unknown format")
+	var newContent string
+	switch format {
+	case FormatFlat:
+		if ym != nil {
+			newContent = conv.UnflattenWithModel(content, ym)
+		} else {
+			newContent = conv.Unflatten(content)
+		}
+
+	case FormatBrace:
+		newContent = conv.Flatten(content)
+
+	default:
+		return nil, fmt.Errorf("unknown format")
+	}
+
+	targetLine := 0
+	if len(cursorPath) > 0 {
+		targetLine = findMatchingLine(lang, newContent, cursorPath, ym)
+	}
+
+	return map[string]any{
+		"content":    newContent,
+		"cursorLine": targetLine,
+	}, nil
+}
+
+// find the line that matches us
+func findMatchingLine(lang Language, content string, cursorPath []string, ym *yang.Model) int {
+	var parsed map[int]ParsedLine
+	if sap, ok := lang.(SchemaAwareParser); ok && ym != nil {
+		parsed = sap.ParseDocumentWithModel(content, ym)
+	} else {
+		parsed = lang.ParseDocument(content)
+	}
+	for lineNum, pl := range parsed {
+		if slices.Equal(cursorPath, pl.PathTokens) {
+			return lineNum
+		}
+	}
+	return 0
 }
