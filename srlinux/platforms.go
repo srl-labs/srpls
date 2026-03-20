@@ -3,7 +3,6 @@ package srlinux
 import (
 	"embed"
 	"encoding/json"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -42,7 +41,7 @@ func init() {
 			continue
 		}
 
-		data, err := interfaceFS.ReadFile(filepath.Join("interfaces", e.Name()))
+		data, err := interfaceFS.ReadFile("interfaces/" + e.Name())
 		if err != nil {
 			continue
 		}

@@ -9,6 +9,22 @@ import (
 	goyang "github.com/openconfig/goyang/pkg/yang"
 )
 
+// maskQuoted returns a copy of s where all characters inside double-quoted
+// strings are replaced with spaces. Quotes themselves are preserved.
+// This allows structural character checks ({, }, [, ]) to ignore quoted content.
+func maskQuoted(s string) string {
+	b := []byte(s)
+	inQuote := false
+	for i := range b {
+		if b[i] == '"' {
+			inQuote = !inQuote
+		} else if inQuote {
+			b[i] = ' '
+		}
+	}
+	return string(b)
+}
+
 // Flatten converts brace-format config to flat format.
 func (d *DefaultLanguage) Flatten(content string) string {
 	preamble, body := splitLeadingPreamble(content, d.IsComment)
@@ -30,8 +46,12 @@ func (d *DefaultLanguage) Flatten(content string) string {
 			continue
 		}
 
+		// Use masked version for all structural character checks so that
+		// characters inside quoted strings are never treated as syntax.
+		masked := maskQuoted(trimmed)
+
 		if skipDepth > 0 {
-			skipDepth += strings.Count(trimmed, "{") - strings.Count(trimmed, "}")
+			skipDepth += strings.Count(masked, "{") - strings.Count(masked, "}")
 			continue
 		}
 		if d.IsSkipBlock(trimmed) {
@@ -68,7 +88,7 @@ func (d *DefaultLanguage) Flatten(content string) string {
 		}
 
 		// Leaf-list: keyword [ val1 val2 ... ]
-		if strings.HasSuffix(trimmed, "[") {
+		if strings.HasSuffix(masked, "[") {
 			leafName := strings.TrimSpace(strings.TrimSuffix(trimmed, "["))
 			var vals []string
 			for i++; i < len(lines); i++ {
@@ -108,9 +128,9 @@ func (d *DefaultLanguage) Flatten(content string) string {
 
 		// Handle single-line inline blocks (e.g.: member "x" { }).
 		// These are net-zero for scope depth.
-		if strings.Contains(trimmed, "{") && strings.Contains(trimmed, "}") &&
-			strings.Count(trimmed, "{") == strings.Count(trimmed, "}") {
-			blockPart := strings.TrimSpace(trimmed[:strings.Index(trimmed, "{")])
+		if strings.Contains(masked, "{") && strings.Contains(masked, "}") &&
+			strings.Count(masked, "{") == strings.Count(masked, "}") {
+			blockPart := strings.TrimSpace(trimmed[:strings.Index(masked, "{")])
 			if blockPart != "" {
 				path := flatPath(stack)
 				out = append(out, flatPrefix+path+blockPart)
@@ -118,7 +138,7 @@ func (d *DefaultLanguage) Flatten(content string) string {
 			continue
 		}
 
-		if strings.HasSuffix(trimmed, "{") {
+		if strings.HasSuffix(masked, "{") {
 			blockPart := strings.TrimSpace(strings.TrimSuffix(trimmed, "{"))
 			tokens := TokenizeLine(blockPart)
 			if len(tokens) >= 1 {
@@ -129,8 +149,8 @@ func (d *DefaultLanguage) Flatten(content string) string {
 			continue
 		}
 
-		if strings.Contains(trimmed, "}") {
-			for range strings.Count(trimmed, "}") {
+		if strings.Contains(masked, "}") {
+			for range strings.Count(masked, "}") {
 				if len(depthStack) > 0 {
 					stack = stack[:depthStack[len(depthStack)-1]]
 					depthStack = depthStack[:len(depthStack)-1]
@@ -272,8 +292,9 @@ func (d *DefaultLanguage) UnflattenWithModel(content string, ym *yang.Model) str
 			} else {
 				sb.WriteString(indent + child.name + " {\n")
 				for _, leaf := range child.leaves {
-					if strings.Contains(leaf, "[") && strings.Contains(leaf, "]") {
-						bracketIdx := strings.Index(leaf, "[")
+					maskedLeaf := maskQuoted(leaf)
+					if strings.Contains(maskedLeaf, "[") && strings.Contains(maskedLeaf, "]") {
+						bracketIdx := strings.Index(maskedLeaf, "[")
 						keyword := strings.TrimSpace(leaf[:bracketIdx])
 						listContent := strings.TrimSpace(leaf[bracketIdx+1 : len(leaf)-1])
 						vals := strings.Fields(listContent)
@@ -389,7 +410,8 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 		}
 
 		// Handle leaf-list: ... keyword [val1 val2]
-		if bracketIdx := strings.Index(body, "["); bracketIdx >= 0 {
+		maskedBody := maskQuoted(body)
+		if bracketIdx := strings.Index(maskedBody, "["); bracketIdx >= 0 {
 			pathPart := strings.TrimSpace(body[:bracketIdx])
 			listPart := body[bracketIdx:]
 			tokens := TokenizeLine(pathPart)
@@ -466,8 +488,9 @@ func (d *DefaultLanguage) Unflatten(content string) string {
 			} else {
 				sb.WriteString(indent + child.name + " {\n")
 				for _, leaf := range child.leaves {
-					if strings.Contains(leaf, "[") && strings.Contains(leaf, "]") {
-						bracketIdx := strings.Index(leaf, "[")
+					maskedLeaf := maskQuoted(leaf)
+					if strings.Contains(maskedLeaf, "[") && strings.Contains(maskedLeaf, "]") {
+						bracketIdx := strings.Index(maskedLeaf, "[")
 						keyword := strings.TrimSpace(leaf[:bracketIdx])
 						listContent := strings.TrimSpace(leaf[bracketIdx+1 : len(leaf)-1])
 						vals := strings.Fields(listContent)

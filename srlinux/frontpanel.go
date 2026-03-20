@@ -4,7 +4,6 @@ import (
 	"embed"
 	"encoding/base64"
 	"fmt"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -31,7 +30,7 @@ func init() {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".svg") {
 			continue
 		}
-		data, err := chassisFS.ReadFile(filepath.Join("chassis", e.Name()))
+		data, err := chassisFS.ReadFile("chassis/" + e.Name())
 		if err != nil {
 			continue
 		}
