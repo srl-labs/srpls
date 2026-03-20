@@ -17,13 +17,19 @@ import (
 )
 
 var (
-	version    string = "0.1.2"
+	version    string = "0.0.0"
 	stdHandler protocol.Handler
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	nos := flag.String("nos", "", "NOS to start lang srv for, ie. srlinux, sros")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	if *nos == "" {
 		fmt.Fprintln(os.Stderr, "required flag: --nos")
