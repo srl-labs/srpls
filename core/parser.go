@@ -18,10 +18,10 @@ func TokenizeLine(s string) []string {
 		if rem[0] == '"' {
 			end := strings.Index(rem[1:], "\"")
 			if end >= 0 {
-				tokens = append(tokens, rem[1:end+1])
+				tokens = append(tokens, rem[:end+2])
 				rem = strings.TrimSpace(rem[end+2:])
 			} else {
-				tokens = append(tokens, rem[1:])
+				tokens = append(tokens, rem)
 				rem = ""
 			}
 		} else {
@@ -188,7 +188,7 @@ func (d *DefaultLanguage) ParseBraceDocument(content string) map[int]ParsedLine 
 			leafValue := ""
 			if len(tokens) >= 2 {
 				afterKeyword := strings.TrimSpace(trimmed[len(leafName):])
-				leafValue = utils.StripQuotes(afterKeyword)
+				leafValue = afterKeyword
 			}
 
 			pathTokens := make([]string, 0, len(stack)+1)
@@ -389,7 +389,7 @@ func parseFlatLineWithModel(body string, lineText string, ym *yang.Model) Parsed
 
 		case entry.Kind == goyang.LeafEntry:
 			leafName = tok
-			leafValue = utils.StripQuotes(strings.TrimSpace(rest))
+			leafValue = strings.TrimSpace(rest)
 			rest = ""
 		}
 	}
@@ -412,9 +412,9 @@ func nextToken(s string) (string, int) {
 	if s[0] == '"' {
 		end := strings.Index(s[1:], "\"")
 		if end >= 0 {
-			return s[1 : end+1], end + 2
+			return s[:end+2], end + 2
 		}
-		return s[1:], len(s)
+		return s, len(s)
 	}
 	end := strings.IndexAny(s, " \t")
 	if end < 0 {
