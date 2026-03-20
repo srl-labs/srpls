@@ -1,0 +1,38 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    binary: srpls
+
+nfpms:
+  - id: srpls-nfpms
+    package_name: srpls
+    vendor: srl-labs
+    description: Nokia SR Language Server
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+
+publishers:
+  - name: fury.io deb/rpm packages
+    ids:
+      - srpls-nfpms
+    dir: "{{ dir .ArtifactPath }}"
+    cmd: curl -F package=@{{ .ArtifactName }} https://{{ .Env.FURY_TOKEN }}@push.fury.io/netdevops/
+
+release:
+  prerelease: auto
+
+changelog:
+  use: github-native

@@ -8,32 +8,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            runner: ubuntu-latest
-            nfpm_arch: x86_64
-          - goos: linux
-            goarch: arm64
-            runner: ubuntu-latest
-            nfpm_arch: arm64
-          - goos: darwin
-            goarch: amd64
-            runner: macos-14
-          - goos: darwin
-            goarch: arm64
-            runner: macos-14
-          - goos: windows
-            goarch: amd64
-            runner: ubuntu-latest
-          - goos: windows
-            goarch: arm64
-            runner: ubuntu-latest
-
-    runs-on: ${{ matrix.runner }}
+  release:
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
@@ -46,40 +22,12 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Cache Go modules
-        uses: actions/cache@v5
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FURY_TOKEN: ${{ secrets.FURY_TOKEN }}
 
-      - name: Build binary
-        run: |
-          mkdir -p dist
-          EXT=""
-          if [ "${{ matrix.goos }}" = "windows" ]; then EXT=".exe"; fi
-          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
-          go build -trimpath \
-            -ldflags "-s -w -X main.version=${{ github.event.release.tag_name }}" \
-            -o "dist/srpls-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
-
-      - name: Install nfpm
-        if: matrix.nfpm_arch != ''
-        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-
-      - name: Build packages
-        if: matrix.nfpm_arch != ''
-        run: |
-          mkdir -p bin
-          cp "dist/srpls-${{ matrix.goos }}-${{ matrix.goarch }}" bin/srpls
-          ARCH=${{ matrix.nfpm_arch }} PLATFORM=${{ matrix.goos }} nfpm pkg -p deb -f nfpm.yaml -t dist/
-          ARCH=${{ matrix.nfpm_arch }} PLATFORM=${{ matrix.goos }} nfpm pkg -p rpm -f nfpm.yaml -t dist/
-
-      - name: Upload release assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*
