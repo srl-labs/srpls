@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	version    string = "0.1.2"
+	version    string = "0.0.0"
 	stdHandler protocol.Handler
 )
 
