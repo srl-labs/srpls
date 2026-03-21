@@ -42,10 +42,6 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 	}
 
 	if version == "" {
-		ctx.Notify("srpls/modelsNotFound", map[string]string{
-			"uri":     uri,
-			"version": "",
-		})
 		return
 	}
 
@@ -67,17 +63,19 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 		return
 	}
 	documentPlatforms[uri] = platform
+
 	yangDir := resolver.YangDirForVersion(version)
 	if info, err := os.Stat(yangDir); err == nil && info.IsDir() {
 		loadYangModel(ctx, uri, version, l, yangDir)
 		notifyVersion(ctx, uri, version, platform, true)
-	} else {
-		ctx.Notify("srpls/modelsNotFound", map[string]string{
-			"uri":     uri,
-			"version": version,
-		})
-		notifyVersion(ctx, uri, version, platform, false)
+		return
 	}
+
+	ctx.Notify("srpls/modelsNotFound", map[string]string{
+		"uri":     uri,
+		"version": version,
+	})
+	notifyVersion(ctx, uri, version, platform, false)
 }
 
 func notifyVersion(ctx *glsp.Context, uri, version, platform string, modelsLoaded bool) {

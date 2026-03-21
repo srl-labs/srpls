@@ -11,7 +11,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 )
 
-var versionKeyRe = regexp.MustCompile(`(?i)version\s*=\s*(\d+\.\d+)`)
+var versionKeyRe = regexp.MustCompile(`(?i)version\s*=\s*(\S+)`)
 
 type SRLinux struct {
 	core.DefaultLanguage
@@ -20,10 +20,10 @@ type SRLinux struct {
 func init() {
 	core.Register(&SRLinux{
 		DefaultLanguage: core.DefaultLanguage{
-			LangName:        "srlinux",
-			LangRootModules: []string{"srl_nokia"},
+			LangName:          "srlinux",
+			LangRootModules:   []string{"srl_nokia"},
 			CommentPrefixes:   []string{"#", "//", "!"},
-			DefaultVersion:    "25.10",
+			DefaultVersion:    "",
 			YangDirBase:       "srlinux",
 			YangDirFilePrefix: "srlinux_",
 			Hints: map[string][]string{

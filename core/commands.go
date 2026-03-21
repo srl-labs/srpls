@@ -22,6 +22,12 @@ const CommandSetVersion = "srpls.setVersion"
 // CommandSetPlatform is the LSP executeCommand name for setting the platform directive.
 const CommandSetPlatform = "srpls.setPlatform"
 
+// CommandReloadVersion is the LSP executeCommand name for re-evaluating version after model download.
+const CommandReloadVersion = "srpls.reloadVersion"
+
+// CommandSetDefaultVersion sets the fallback version used when no version is detected from the document.
+const CommandSetDefaultVersion = "srpls.setDefaultVersion"
+
 // Converter is implemented by languages that support format conversion.
 type Converter interface {
 	Flatten(content string) string
@@ -30,7 +36,7 @@ type Converter interface {
 }
 
 // WorkspaceExecuteCommand handles workspace/executeCommand requests.
-func WorkspaceExecuteCommand(_ *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
+func WorkspaceExecuteCommand(ctx *glsp.Context, params *protocol.ExecuteCommandParams) (any, error) {
 	switch params.Command {
 	case CommandConvert:
 		return handleConvert(params.Arguments)
@@ -44,6 +50,10 @@ func WorkspaceExecuteCommand(_ *glsp.Context, params *protocol.ExecuteCommandPar
 		return handleSetDirective(params.Arguments, func(he HeaderEditor, content, value string) string {
 			return he.SetPlatformDirective(content, value)
 		})
+	case CommandReloadVersion:
+		return handleReloadVersion(ctx, params.Arguments)
+	case CommandSetDefaultVersion:
+		return handleSetDefaultVersion(ctx, params.Arguments)
 	}
 	return nil, fmt.Errorf("unknown command: %s", params.Command)
 }
@@ -81,6 +91,56 @@ func handleSetDirective(args []any, apply func(HeaderEditor, string, string) str
 
 	content := documentStore[uri]
 	return apply(he, content, value), nil
+}
+
+func handleReloadVersion(ctx *glsp.Context, args []any) (any, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("reloadVersion requires [uri]")
+	}
+	uri, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a URI string")
+	}
+
+	l := documentLangs[uri]
+	if l == nil {
+		return nil, fmt.Errorf("no language found for URI")
+	}
+
+	delete(DocumentVersions, uri)
+
+	content := documentStore[uri]
+	if content != "" {
+		detectAndHandleVersion(ctx, uri, content, l)
+	}
+	return nil, nil
+}
+
+func handleSetDefaultVersion(ctx *glsp.Context, args []any) (any, error) {
+	if len(args) < 1 {
+		return nil, fmt.Errorf("setDefaultVersion requires [version]")
+	}
+	version, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a version string")
+	}
+	for _, l := range Registry {
+		if dl, ok := l.(interface{ SetDefaultVersion(string) }); ok {
+			dl.SetDefaultVersion(version)
+		}
+	}
+
+	for uri, content := range documentStore {
+		if DocumentVersions[uri] != "" {
+			continue
+		}
+		l := documentLangs[uri]
+		if l == nil {
+			continue
+		}
+		detectAndHandleVersion(ctx, uri, content, l)
+	}
+	return nil, nil
 }
 
 func handleConvert(args []any) (any, error) {
