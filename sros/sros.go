@@ -7,7 +7,7 @@ import (
 	"github.com/srl-labs/srpls/core"
 )
 
-var srosVersionKeyRe = regexp.MustCompile(`(?i)version\s*=\s*(\d+\.\d+)`)
+var srosVersionKeyRe = regexp.MustCompile(`(?i)version\s*=\s*(\S+)`)
 var srosPlatformRe = regexp.MustCompile(`(?i)platform\s*=\s*\S+`)
 
 type SROS struct {
@@ -19,9 +19,9 @@ type SROS struct {
 func (s *SROS) DetectVersion(content string) string {
 	line1, _, _ := strings.Cut(content, "\n")
 	if m := srosVersionKeyRe.FindStringSubmatch(line1); m != nil {
-		return m[1]
+		return strings.ToUpper(m[1])
 	}
-	return s.DefaultLanguage.DetectVersion(content)
+	return strings.ToUpper(s.DefaultLanguage.DetectVersion(content))
 }
 
 func (s *SROS) SetVersionDirective(content, version string) string {
@@ -56,11 +56,10 @@ func init() {
 			CommentPrefixes:   []string{"#"},
 			SkipBlockPrefixes: []string{"persistent-indices"},
 			VersionPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`TiMOS-[A-Z]-(\d+\.\d+)`),
-				regexp.MustCompile(`Configuration format version (\d+\.\d+)`),
+				regexp.MustCompile(`TiMOS-[A-Z]-(\d+\.\d+\.\S+)`),
 			},
 			FlatPrefix:        "/",
-			DefaultVersion:    "25.10",
+			DefaultVersion:    "",
 			YangDirBase:       "sros",
 			YangDirFilePrefix: "latest_sros_",
 			Hints: map[string][]string{

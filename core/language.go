@@ -139,11 +139,12 @@ type DefaultLanguage struct {
 	Owner Language
 }
 
-func (d *DefaultLanguage) SetOwner(l Language)       { d.Owner = l }
-func (d *DefaultLanguage) Name() string              { return d.LangName }
-func (d *DefaultLanguage) SkipDirs() map[string]bool { return d.LangSkipDirs }
-func (d *DefaultLanguage) RootModules() []string     { return d.LangRootModules }
-func (d *DefaultLanguage) GetDefaultVersion() string { return d.DefaultVersion }
+func (d *DefaultLanguage) SetOwner(l Language)        { d.Owner = l }
+func (d *DefaultLanguage) Name() string               { return d.LangName }
+func (d *DefaultLanguage) SkipDirs() map[string]bool  { return d.LangSkipDirs }
+func (d *DefaultLanguage) RootModules() []string      { return d.LangRootModules }
+func (d *DefaultLanguage) GetDefaultVersion() string  { return d.DefaultVersion }
+func (d *DefaultLanguage) SetDefaultVersion(v string) { d.DefaultVersion = v }
 
 func (d *DefaultLanguage) FlatLinePrefix() string {
 	if d.FlatPrefix != "" {
