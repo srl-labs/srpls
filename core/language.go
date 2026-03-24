@@ -120,6 +120,14 @@ type DefaultVersionProvider interface {
 	GetDefaultVersion() string
 }
 
+type FallbackResolver interface {
+	FindFallbackVersion(requestedVersion string) (fallbackVersion, fallbackDir string, ok bool)
+}
+
+type LatestVersionResolver interface {
+	FindLatestVersion() (version, dir string, ok bool)
+}
+
 type DefaultLanguage struct {
 	LangName          string
 	LangSkipDirs      map[string]bool
@@ -156,6 +164,26 @@ func (d *DefaultLanguage) FlatLinePrefix() string {
 func (d *DefaultLanguage) YangDirForVersion(version string) string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".srpls", d.YangDirBase, "yang", d.YangDirFilePrefix+version)
+}
+
+func (d *DefaultLanguage) FindFallbackVersion(requested string) (string, string, bool) {
+	home, _ := os.UserHomeDir()
+	parentDir := filepath.Join(home, ".srpls", d.YangDirBase, "yang")
+	ver, ok := findFallbackVersion(parentDir, d.YangDirFilePrefix, requested)
+	if !ok {
+		return "", "", false
+	}
+	return ver, filepath.Join(parentDir, d.YangDirFilePrefix+ver), true
+}
+
+func (d *DefaultLanguage) FindLatestVersion() (string, string, bool) {
+	home, _ := os.UserHomeDir()
+	parentDir := filepath.Join(home, ".srpls", d.YangDirBase, "yang")
+	ver, ok := findLatestVersion(parentDir, d.YangDirFilePrefix)
+	if !ok {
+		return "", "", false
+	}
+	return ver, filepath.Join(parentDir, d.YangDirFilePrefix+ver), true
 }
 
 func (d *DefaultLanguage) DetectVersion(content string) string {

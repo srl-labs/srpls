@@ -33,25 +33,27 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 	}
 
 	version := vd.DetectVersion(content)
-
-	// fallback to default if nothin detected
 	if version == "" {
 		if dvp, ok := l.(DefaultVersionProvider); ok {
 			version = dvp.GetDefaultVersion()
 		}
 	}
-
+	if version == "" {
+		if lr, ok := l.(LatestVersionResolver); ok {
+			if v, _, found := lr.FindLatestVersion(); found {
+				version = v
+			}
+		}
+	}
 	if version == "" {
 		return
 	}
 
 	platform := detectPlatform(content, l)
 
-	prev := DocumentVersions[uri]
-	prevPlatform := documentPlatforms[uri]
-	if prev == version {
+	if DocumentVersions[uri] == version {
 		scheduler.schedule(ctx, uri, content, l, version)
-		if platform != prevPlatform {
+		if platform != documentPlatforms[uri] {
 			documentPlatforms[uri] = platform
 			notifyVersion(ctx, uri, version, platform, true)
 		}
@@ -64,27 +66,43 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 	}
 	documentPlatforms[uri] = platform
 
-	yangDir := resolver.YangDirForVersion(version)
-	if info, err := os.Stat(yangDir); err == nil && info.IsDir() {
-		loadYangModel(ctx, uri, version, l, yangDir)
-		notifyVersion(ctx, uri, version, platform, true)
-		return
+	var yangDir, fallbackVer string
+	exactDir := resolver.YangDirForVersion(version)
+	if info, err := os.Stat(exactDir); err == nil && info.IsDir() {
+		yangDir = exactDir
+	} else if fb, ok := l.(FallbackResolver); ok {
+		if fv, fd, found := fb.FindFallbackVersion(version); found {
+			yangDir = fd
+			fallbackVer = fv
+		}
 	}
 
-	ctx.Notify("srpls/modelsNotFound", map[string]string{
-		"uri":     uri,
-		"version": version,
-	})
-	notifyVersion(ctx, uri, version, platform, false)
+	if yangDir != "" {
+		loadYangModel(ctx, uri, version, l, yangDir)
+		notifyVersion(ctx, uri, version, platform, true, fallbackVer)
+	} else {
+		notifyVersion(ctx, uri, version, platform, false)
+	}
+
+	if yangDir != exactDir {
+		ctx.Notify("srpls/modelsNotFound", map[string]string{
+			"uri":     uri,
+			"version": version,
+		})
+	}
 }
 
-func notifyVersion(ctx *glsp.Context, uri, version, platform string, modelsLoaded bool) {
-	ctx.Notify("srpls/versionDetected", map[string]any{
+func notifyVersion(ctx *glsp.Context, uri, version, platform string, modelsLoaded bool, loadedVersion ...string) {
+	params := map[string]any{
 		"uri":          uri,
 		"version":      version,
 		"platform":     platform,
 		"modelsLoaded": modelsLoaded,
-	})
+	}
+	if len(loadedVersion) > 0 && loadedVersion[0] != "" {
+		params["loadedVersion"] = loadedVersion[0]
+	}
+	ctx.Notify("srpls/versionDetected", params)
 }
 
 func TextDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
