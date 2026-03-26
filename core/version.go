@@ -108,30 +108,16 @@ func findLatestVersion(parentDir, prefix string) (string, bool) {
 	return best.Raw, true
 }
 
-func findFallbackVersion(parentDir, prefix, requested string) (string, bool) {
+func findNearestVersion(requested string, candidates []string) string {
 	req, ok := parseVersion(requested)
 	if !ok {
-		return "", false
-	}
-
-	entries, err := os.ReadDir(parentDir)
-	if err != nil {
-		return "", false
+		return ""
 	}
 
 	var best parsedVersion
 	found := false
-
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if !strings.HasPrefix(name, prefix) {
-			continue
-		}
-		verStr := strings.TrimPrefix(name, prefix)
-		cand, ok := parseVersion(verStr)
+	for _, c := range candidates {
+		cand, ok := parseVersion(c)
 		if !ok || !cand.sameMajorMinor(req) || !cand.lessOrEqual(req) {
 			continue
 		}
@@ -140,9 +126,30 @@ func findFallbackVersion(parentDir, prefix, requested string) (string, bool) {
 			found = true
 		}
 	}
+	if found {
+		return best.Raw
+	}
+	return ""
+}
 
-	if !found {
+func findFallbackVersion(parentDir, prefix, requested string) (string, bool) {
+	entries, err := os.ReadDir(parentDir)
+	if err != nil {
 		return "", false
 	}
-	return best.Raw, true
+
+	var candidates []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), prefix) {
+			candidates = append(candidates, strings.TrimPrefix(e.Name(), prefix))
+		}
+	}
+
+	if v := findNearestVersion(requested, candidates); v != "" {
+		return v, true
+	}
+	return "", false
 }

@@ -28,6 +28,8 @@ const CommandReloadVersion = "srpls.reloadVersion"
 // CommandSetDefaultVersion sets the fallback version used when no version is detected from the document.
 const CommandSetDefaultVersion = "srpls.setDefaultVersion"
 
+const CommandNearestVersion = "srpls.nearestVersion"
+
 // Converter is implemented by languages that support format conversion.
 type Converter interface {
 	Flatten(content string) string
@@ -54,6 +56,8 @@ func WorkspaceExecuteCommand(ctx *glsp.Context, params *protocol.ExecuteCommandP
 		return handleReloadVersion(ctx, params.Arguments)
 	case CommandSetDefaultVersion:
 		return handleSetDefaultVersion(ctx, params.Arguments)
+	case CommandNearestVersion:
+		return handleNearestVersion(params.Arguments)
 	}
 	return nil, fmt.Errorf("unknown command: %s", params.Command)
 }
@@ -141,6 +145,27 @@ func handleSetDefaultVersion(ctx *glsp.Context, args []any) (any, error) {
 		detectAndHandleVersion(ctx, uri, content, l)
 	}
 	return nil, nil
+}
+
+func handleNearestVersion(args []any) (any, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("nearestVersion requires [requested, candidates]")
+	}
+	requested, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a version string")
+	}
+	rawCandidates, ok := args[1].([]any)
+	if !ok {
+		return nil, fmt.Errorf("second argument must be an array of version strings")
+	}
+	candidates := make([]string, 0, len(rawCandidates))
+	for _, v := range rawCandidates {
+		if s, ok := v.(string); ok {
+			candidates = append(candidates, s)
+		}
+	}
+	return findNearestVersion(requested, candidates), nil
 }
 
 func handleConvert(args []any) (any, error) {
