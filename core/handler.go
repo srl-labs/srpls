@@ -26,6 +26,17 @@ func detectPlatform(content string, l Language) string {
 	return ""
 }
 
+func notifyFormat(ctx *glsp.Context, uri, content string, l Language) {
+	formatStr := "flat"
+	if l.DetectFormat(content) == FormatBrace {
+		formatStr = "brace"
+	}
+	ctx.Notify("srpls/formatDetected", map[string]string{
+		"uri":    uri,
+		"format": formatStr,
+	})
+}
+
 func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) {
 	vd, ok := l.(VersionDetector)
 	if !ok {
@@ -51,11 +62,13 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 
 	platform := detectPlatform(content, l)
 
+	format := l.DetectFormat(content)
+
 	if DocumentVersions[uri] == version {
 		scheduler.schedule(ctx, uri, content, l, version)
 		if platform != documentPlatforms[uri] {
 			documentPlatforms[uri] = platform
-			notifyVersion(ctx, uri, version, platform, true)
+			notifyVersion(ctx, uri, version, platform, format, true)
 		}
 		return
 	}
@@ -79,9 +92,9 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 
 	if yangDir != "" {
 		loadYangModel(ctx, uri, version, l, yangDir)
-		notifyVersion(ctx, uri, version, platform, true, fallbackVer)
+		notifyVersion(ctx, uri, version, platform, format, true, fallbackVer)
 	} else {
-		notifyVersion(ctx, uri, version, platform, false)
+		notifyVersion(ctx, uri, version, platform, format, false)
 	}
 
 	if yangDir != exactDir {
@@ -92,11 +105,16 @@ func detectAndHandleVersion(ctx *glsp.Context, uri, content string, l Language) 
 	}
 }
 
-func notifyVersion(ctx *glsp.Context, uri, version, platform string, modelsLoaded bool, loadedVersion ...string) {
+func notifyVersion(ctx *glsp.Context, uri, version, platform string, format ConfigFormat, modelsLoaded bool, loadedVersion ...string) {
+	formatStr := "brace"
+	if format == FormatFlat {
+		formatStr = "flat"
+	}
 	params := map[string]any{
 		"uri":          uri,
 		"version":      version,
 		"platform":     platform,
+		"format":       formatStr,
 		"modelsLoaded": modelsLoaded,
 	}
 	if len(loadedVersion) > 0 && loadedVersion[0] != "" {
@@ -116,6 +134,7 @@ func TextDocumentDidOpen(ctx *glsp.Context, params *protocol.DidOpenTextDocument
 	}
 	documentLangs[uri] = l
 
+	notifyFormat(ctx, uri, content, l)
 	detectAndHandleVersion(ctx, uri, content, l)
 	return nil
 }
@@ -137,6 +156,7 @@ func TextDocumentDidChange(ctx *glsp.Context, params *protocol.DidChangeTextDocu
 		return nil
 	}
 
+	notifyFormat(ctx, uri, content, l)
 	detectAndHandleVersion(ctx, uri, content, l)
 	return nil
 }
