@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 	"slices"
+	"sort"
+	"strings"
 
 	"github.com/srl-labs/srpls/yang"
 
@@ -27,6 +29,14 @@ const CommandReloadVersion = "srpls.reloadVersion"
 
 // CommandSetDefaultVersion sets the fallback version used when no version is detected from the document.
 const CommandSetDefaultVersion = "srpls.setDefaultVersion"
+
+const CommandNearestVersion = "srpls.nearestVersion"
+
+// CommandGotoPath is the LSP executeCommand name for navigating to a path in the document.
+const CommandGotoPath = "srpls.gotoPath"
+
+// CommandDocumentPaths returns all unique paths in the document with their line numbers.
+const CommandDocumentPaths = "srpls.documentPaths"
 
 // Converter is implemented by languages that support format conversion.
 type Converter interface {
@@ -54,6 +64,12 @@ func WorkspaceExecuteCommand(ctx *glsp.Context, params *protocol.ExecuteCommandP
 		return handleReloadVersion(ctx, params.Arguments)
 	case CommandSetDefaultVersion:
 		return handleSetDefaultVersion(ctx, params.Arguments)
+	case CommandNearestVersion:
+		return handleNearestVersion(params.Arguments)
+	case CommandGotoPath:
+		return handleGotoPath(params.Arguments)
+	case CommandDocumentPaths:
+		return handleDocumentPaths(params.Arguments)
 	}
 	return nil, fmt.Errorf("unknown command: %s", params.Command)
 }
@@ -143,6 +159,27 @@ func handleSetDefaultVersion(ctx *glsp.Context, args []any) (any, error) {
 	return nil, nil
 }
 
+func handleNearestVersion(args []any) (any, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("nearestVersion requires [requested, candidates]")
+	}
+	requested, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a version string")
+	}
+	rawCandidates, ok := args[1].([]any)
+	if !ok {
+		return nil, fmt.Errorf("second argument must be an array of version strings")
+	}
+	candidates := make([]string, 0, len(rawCandidates))
+	for _, v := range rawCandidates {
+		if s, ok := v.(string); ok {
+			candidates = append(candidates, s)
+		}
+	}
+	return findNearestVersion(requested, candidates), nil
+}
+
 func handleConvert(args []any) (any, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("convert requires [uri, content]")
@@ -220,6 +257,154 @@ func handleConvert(args []any) (any, error) {
 		"content":    newContent,
 		"cursorLine": targetLine,
 	}, nil
+}
+
+func handleGotoPath(args []any) (any, error) {
+	if len(args) < 3 {
+		return nil, fmt.Errorf("gotoPath requires [uri, content, pathString]")
+	}
+	uri, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a URI string")
+	}
+	content, ok := args[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("second argument must be content string")
+	}
+	pathString, ok := args[2].(string)
+	if !ok {
+		return nil, fmt.Errorf("third argument must be a path string")
+	}
+
+	lang := documentLangs[uri]
+	if lang == nil {
+		return nil, fmt.Errorf("no language found for URI")
+	}
+
+	inputTokens := tokenizeInputPath(pathString)
+	if len(inputTokens) == 0 {
+		return nil, nil
+	}
+
+	version := DocumentVersions[uri]
+	ym := GetYangModel(lang, version)
+	var parsed map[int]ParsedLine
+	if sap, ok := lang.(SchemaAwareParser); ok && ym != nil {
+		parsed = sap.ParseDocumentWithModel(content, ym)
+	} else {
+		parsed = lang.ParseDocument(content)
+	}
+
+	line, exact := findClosestLine(parsed, inputTokens)
+	return map[string]any{
+		"line":  line,
+		"exact": exact,
+	}, nil
+}
+
+func handleDocumentPaths(args []any) (any, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("documentPaths requires [uri, content]")
+	}
+	uri, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a URI string")
+	}
+	content, ok := args[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("second argument must be content string")
+	}
+
+	lang := documentLangs[uri]
+	if lang == nil {
+		return nil, fmt.Errorf("no language found for URI")
+	}
+
+	version := DocumentVersions[uri]
+	ym := GetYangModel(lang, version)
+	var parsed map[int]ParsedLine
+	if sap, ok := lang.(SchemaAwareParser); ok && ym != nil {
+		parsed = sap.ParseDocumentWithModel(content, ym)
+	} else {
+		parsed = lang.ParseDocument(content)
+	}
+
+	type pathEntry struct {
+		Line int    `json:"line"`
+		Path string `json:"path"`
+	}
+
+	// Collect entries sorted by line number
+	entries := make([]pathEntry, 0, len(parsed))
+	for lineNum, pl := range parsed {
+		if len(pl.PathTokens) == 0 {
+			continue
+		}
+		entries = append(entries, pathEntry{
+			Line: lineNum,
+			Path: "/" + strings.Join(pl.PathTokens, " "),
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Line < entries[j].Line
+	})
+
+	return entries, nil
+}
+
+func tokenizeInputPath(input string) []string {
+	s := strings.TrimSpace(input)
+	s = strings.TrimPrefix(s, "/")
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	return TokenizeLine(s)
+}
+
+func findClosestLine(parsed map[int]ParsedLine, inputTokens []string) (int, bool) {
+	type lineEntry struct {
+		num int
+		pl  ParsedLine
+	}
+	entries := make([]lineEntry, 0, len(parsed))
+	for num, pl := range parsed {
+		entries = append(entries, lineEntry{num, pl})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].num < entries[j].num
+	})
+
+	bestLine := -1
+	bestDepth := -1
+
+	for _, e := range entries {
+		matchLen := prefixMatchLen(e.pl.PathTokens, inputTokens)
+		if matchLen == 0 {
+			continue
+		}
+		if matchLen == len(inputTokens) && matchLen == len(e.pl.PathTokens) {
+			return e.num, true
+		}
+		if matchLen > bestDepth {
+			bestDepth = matchLen
+			bestLine = e.num
+		}
+	}
+	return bestLine, false
+}
+
+func prefixMatchLen(a, b []string) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if !strings.EqualFold(a[i], b[i]) {
+			return i
+		}
+	}
+	return n
 }
 
 // find the line that matches us
