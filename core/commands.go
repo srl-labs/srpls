@@ -35,6 +35,9 @@ const CommandNearestVersion = "srpls.nearestVersion"
 // CommandGotoPath is the LSP executeCommand name for navigating to a path in the document.
 const CommandGotoPath = "srpls.gotoPath"
 
+// CommandDocumentPaths returns all unique paths in the document with their line numbers.
+const CommandDocumentPaths = "srpls.documentPaths"
+
 // Converter is implemented by languages that support format conversion.
 type Converter interface {
 	Flatten(content string) string
@@ -65,6 +68,8 @@ func WorkspaceExecuteCommand(ctx *glsp.Context, params *protocol.ExecuteCommandP
 		return handleNearestVersion(params.Arguments)
 	case CommandGotoPath:
 		return handleGotoPath(params.Arguments)
+	case CommandDocumentPaths:
+		return handleDocumentPaths(params.Arguments)
 	}
 	return nil, fmt.Errorf("unknown command: %s", params.Command)
 }
@@ -295,6 +300,56 @@ func handleGotoPath(args []any) (any, error) {
 		"line":  line,
 		"exact": exact,
 	}, nil
+}
+
+func handleDocumentPaths(args []any) (any, error) {
+	if len(args) < 2 {
+		return nil, fmt.Errorf("documentPaths requires [uri, content]")
+	}
+	uri, ok := args[0].(string)
+	if !ok {
+		return nil, fmt.Errorf("first argument must be a URI string")
+	}
+	content, ok := args[1].(string)
+	if !ok {
+		return nil, fmt.Errorf("second argument must be content string")
+	}
+
+	lang := documentLangs[uri]
+	if lang == nil {
+		return nil, fmt.Errorf("no language found for URI")
+	}
+
+	version := DocumentVersions[uri]
+	ym := GetYangModel(lang, version)
+	var parsed map[int]ParsedLine
+	if sap, ok := lang.(SchemaAwareParser); ok && ym != nil {
+		parsed = sap.ParseDocumentWithModel(content, ym)
+	} else {
+		parsed = lang.ParseDocument(content)
+	}
+
+	type pathEntry struct {
+		Line int    `json:"line"`
+		Path string `json:"path"`
+	}
+
+	// Collect entries sorted by line number
+	entries := make([]pathEntry, 0, len(parsed))
+	for lineNum, pl := range parsed {
+		if len(pl.PathTokens) == 0 {
+			continue
+		}
+		entries = append(entries, pathEntry{
+			Line: lineNum,
+			Path: "/" + strings.Join(pl.PathTokens, " "),
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Line < entries[j].Line
+	})
+
+	return entries, nil
 }
 
 func tokenizeInputPath(input string) []string {
